@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import { CURSED_APPLE, isOwnable } from "../src/board";
 import { DECKS } from "../src/cards";
 import { CLASSIC_RULES } from "../src/config";
-import { applyAction, createGame, getLegalActions, WALKER } from "../src/game";
+import { applyAction, createGame } from "../src/game";
+import { getLegalActions } from "../src/legal";
+import { WALKER } from "../src/rules";
 import { act, newGame, own, player, roll, stackCard } from "./helpers";
 
 const legal = (state: Parameters<typeof getLegalActions>[0], id: string) =>
@@ -78,7 +80,7 @@ describe("movement", () => {
   });
 
   it("grants another roll after doubles and jails on the third", () => {
-    let s = newGame();
+    let s = newGame(2, { auctions: false });
     ({ state: s } = roll(s, [3, 3]));
     ({ state: s } = act(s, "a", "decline"));
     expect(s.phase).toEqual({ kind: "awaitingRoll" });
@@ -104,7 +106,7 @@ describe("buying", () => {
   });
 
   it("leaves property unowned when declined", () => {
-    let s = newGame();
+    let s = newGame(2, { auctions: false });
     ({ state: s } = roll(s, [1, 2]));
     ({ state: s } = act(s, "a", "decline"));
     expect(s.owners[3]).toBeNull();
@@ -193,7 +195,7 @@ describe("taxes and the Soul Urn", () => {
 
 describe("the Lost Whisper", () => {
   const jailed = () => {
-    const s = newGame();
+    const s = newGame(2, { auctions: false });
     Object.assign(player(s, "a"), { position: 10, inJail: true });
     return s;
   };
@@ -344,10 +346,10 @@ describe("bankruptcy", () => {
   });
 
   it("returns assets to the bank on an unpayable tax and skips the player afterwards", () => {
-    let s = newGame(3);
+    let s = newGame(3, { auctions: false });
     own(s, "a", 1);
     s.buildings[1] = 3;
-    player(s, "a").cash = 100;
+    player(s, "a").cash = 10;
     ({ state: s } = roll(s, [1, 3]));
     expect(player(s, "a").bankrupt).toBe(true);
     expect(s.owners[1]).toBeNull();

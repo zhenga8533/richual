@@ -1,9 +1,10 @@
 import fc from "fast-check";
 import { afterAll, describe, expect, it } from "vitest";
-import { getBoard, isOwnable } from "../src/board";
+import { getBoard, groupIndices, isOwnable } from "../src/board";
 import { DECKS, type DeckId } from "../src/cards";
 import { CLASSIC_RULES, type RuleConfig } from "../src/config";
-import { activePlayers, currentPlayer, getLegalActions } from "../src/game";
+import { getLegalActions } from "../src/legal";
+import { activePlayers, buildingsInUse, currentPlayer, tradeProblem } from "../src/rules";
 import { replay, type SimulationStep, simulateGame } from "../src/simulate";
 import { IDS, totalCash } from "./helpers";
 
@@ -58,6 +59,28 @@ function checkInvariants({ before, after, events }: SimulationStep): void {
     check(pile.length + held === DECKS[deck].cards.length, `${deck} cards are all accounted for`);
   }
 
+  // Sealing and buildings stay consistent with ownership and the bank's supply.
+  after.sealed.forEach((sealed, i) => {
+    if (!sealed) return;
+    check(after.owners[i] !== null, `sealed space ${i} is owned`);
+    const space = board.spaces[i];
+    if (space?.kind === "property") {
+      const group = groupIndices(board, space.group);
+      check(
+        group.every((g) => (after.buildings[g] ?? 0) === 0),
+        `no buildings beside sealed ${i}`,
+      );
+    }
+  });
+  if (after.config.limitedBuildings) {
+    const inUse = buildingsInUse(after);
+    check(inUse.guardians <= board.guardianSupply, "guardian supply respected");
+    check(inUse.walkers <= board.walkerSupply, "walker supply respected");
+  }
+  for (const trade of after.trades) {
+    check(tradeProblem(after, board, trade) === null, `open trade ${trade.id} is executable`);
+  }
+
   const active = activePlayers(after);
   if (after.phase.kind === "gameOver") {
     check(
@@ -67,17 +90,49 @@ function checkInvariants({ before, after, events }: SimulationStep): void {
     return;
   }
   check(active.length >= 2, "an ongoing game has at least two players");
+  // A bankrupt player's turn only lasts until their debts and auctions are settled.
   const current = currentPlayer(after);
-  check(!current.bankrupt, "the current player is active");
-  check(getLegalActions(after, current.id).length > 0, "the current player can act");
-  for (const other of after.players) {
-    if (other.id !== current.id) {
-      check(getLegalActions(after, other.id).length === 0, `${other.id} cannot act out of turn`);
+
+  const deciding = (id: string) =>
+    getLegalActions(after, id).filter(
+      (a) => !["acceptTrade", "rejectTrade", "cancelTrade", "proposeTrade"].includes(a.type),
+    );
+  const phase = after.phase;
+  switch (phase.kind) {
+    case "raisingFunds": {
+      const debt = after.debts[0];
+      check(debt !== undefined, "raising funds implies a debt");
+      check(debt.amount > 0, "debts are positive");
+      check(!after.players.find((p) => p.id === debt.debtor)?.bankrupt, "the debtor is active");
+      check(deciding(debt.debtor).length > 0, "the debtor can act");
+      break;
     }
-  }
-  if (after.phase.kind === "awaitingBuy") {
-    check(after.phase.space === current.position, "the offered space is where the player stands");
-    check(after.owners[after.phase.space] === null, "the offered space is unowned");
+    case "auction": {
+      check(phase.bidders.length > 0, "an auction has bidders");
+      check(after.owners[phase.space] === null, "the auctioned space is unowned");
+      if (phase.highBidder) {
+        const cash = after.players.find((p) => p.id === phase.highBidder)?.cash ?? 0;
+        check(phase.highBid <= cash, "the high bidder can pay");
+      }
+      check(
+        phase.bidders.some((id) => deciding(id).length > 0),
+        "a bidder can act",
+      );
+      break;
+    }
+    default:
+      check(!current.bankrupt, "the current player is active");
+      check(after.debts.length === 0, "debts only exist while raising funds");
+      check(deciding(current.id).length > 0, "the current player can act");
+      for (const other of after.players) {
+        if (other.id !== current.id) {
+          check(deciding(other.id).length === 0, `${other.id} cannot act out of turn`);
+        }
+      }
+      if (phase.kind === "awaitingBuy") {
+        check(phase.space === current.position, "the offered space is where the player stands");
+        check(after.owners[phase.space] === null, "the offered space is unowned");
+      }
   }
 }
 
@@ -89,7 +144,13 @@ describe("simulation", () => {
       fc.property(
         fc.integer({ min: 0, max: 0xffffffff }),
         fc.integer({ min: 2, max: 6 }),
-        fc.record({ doubleOnExactGo: fc.boolean(), freeParkingJackpot: fc.boolean() }),
+        fc.record({
+          doubleOnExactGo: fc.boolean(),
+          freeParkingJackpot: fc.boolean(),
+          auctions: fc.boolean(),
+          evenBuilding: fc.boolean(),
+          limitedBuildings: fc.boolean(),
+        }),
         (seed, n, toggles) => {
           const rules: RuleConfig = { ...CLASSIC_RULES, ...toggles };
           simulateGame({

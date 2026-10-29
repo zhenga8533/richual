@@ -43,6 +43,9 @@ export type BoardDefinition = {
   ziplineRent: readonly [number, number, number, number];
   /** Dice-total multiplier by number of utilities owned (1–2). */
   utilityMultiplier: readonly [number, number];
+  /** The bank's building stock when supply is limited. */
+  guardianSupply: number;
+  walkerSupply: number;
 };
 
 export function isOwnable(space: Space): space is OwnableSpace {
@@ -79,6 +82,8 @@ export const CURSED_APPLE: BoardDefinition = {
   },
   ziplineRent: [25, 50, 100, 200],
   utilityMultiplier: [4, 10],
+  guardianSupply: 32,
+  walkerSupply: 12,
   spaces: [
     { kind: "go", name: "Astral Gate" },
     property("Rat Warrens", "brown", 60, 50, [2, 10, 30, 90, 160, 250]),

@@ -28,6 +28,18 @@ export function act(
   return { state: result.state, events: result.events };
 }
 
+/** Applies a fully specified action, failing the test if it is rejected. */
+export function apply(
+  state: GameState,
+  playerId: PlayerId,
+  action: Action,
+  dice?: readonly [number, number],
+): { state: GameState; events: GameEvent[] } {
+  const result = applyAction(state, playerId, action, dice ? { dice } : {});
+  if (!result.ok) throw new Error(`${action.type} by ${playerId} failed: ${result.error.message}`);
+  return { state: result.state, events: result.events };
+}
+
 /** Rolls `dice` for the current player. */
 export function roll(state: GameState, dice: readonly [number, number]) {
   const player = state.players[state.turn.playerIndex];

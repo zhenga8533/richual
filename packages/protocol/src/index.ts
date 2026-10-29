@@ -3,7 +3,7 @@ import { HERO_IDS } from "@richual/engine";
 import { z } from "zod";
 
 /** Bumped on any breaking change to the wire format; clients on another version must reload. */
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 
 export const MAX_MESSAGE_BYTES = 16 * 1024;
 export const MAX_PLAYERS = 6;
@@ -66,6 +66,9 @@ export const LobbySettings = z.object({
   startingCash: z.number().int().min(500).max(5000).multipleOf(100).default(1500),
   doubleOnExactGo: z.boolean().default(true),
   freeParkingJackpot: z.boolean().default(true),
+  auctions: z.boolean().default(true),
+  /** Even building plus the bank's limited Guardian and Walker supply. */
+  evenBuilding: z.boolean().default(true),
 });
 export type LobbySettings = z.infer<typeof LobbySettings>;
 
@@ -100,6 +103,14 @@ export type LobbySnapshot = z.infer<typeof LobbySnapshot>;
 export const PING = '{"type":"ping"}';
 export const PONG = '{"type":"pong"}';
 
+const Space = z.number().int().min(0).max(63);
+const DeckId = z.enum(["oracle", "coven"]);
+const TradeBundle = z.object({
+  cash: z.number().int().min(0).max(1_000_000),
+  spaces: z.array(Space).max(40),
+  getOutCards: z.array(DeckId).max(4),
+});
+
 export const GameAction = z.discriminatedUnion("type", [
   z.object({ type: z.literal("roll") }),
   z.object({ type: z.literal("payJailFine") }),
@@ -107,6 +118,23 @@ export const GameAction = z.discriminatedUnion("type", [
   z.object({ type: z.literal("buy") }),
   z.object({ type: z.literal("decline") }),
   z.object({ type: z.literal("endTurn") }),
+  z.object({ type: z.literal("build"), space: Space }),
+  z.object({ type: z.literal("sellBuilding"), space: Space }),
+  z.object({ type: z.literal("seal"), space: Space }),
+  z.object({ type: z.literal("unseal"), space: Space }),
+  z.object({ type: z.literal("bid"), amount: z.number().int().min(1).max(1_000_000) }),
+  z.object({ type: z.literal("passAuction") }),
+  z.object({ type: z.literal("payDebt") }),
+  z.object({ type: z.literal("declareBankruptcy") }),
+  z.object({
+    type: z.literal("proposeTrade"),
+    to: z.string().max(64),
+    offer: TradeBundle,
+    request: TradeBundle,
+  }),
+  z.object({ type: z.literal("acceptTrade"), tradeId: z.number().int() }),
+  z.object({ type: z.literal("rejectTrade"), tradeId: z.number().int() }),
+  z.object({ type: z.literal("cancelTrade"), tradeId: z.number().int() }),
 ]);
 // Fails to compile if the schema and the engine's Action type drift apart.
 const _actionsMatch: [z.infer<typeof GameAction>, Action] extends [

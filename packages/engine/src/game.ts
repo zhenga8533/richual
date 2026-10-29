@@ -1,21 +1,33 @@
 import { type BoardDefinition, getBoard, groupIndices, indicesOfKind, jailIndex } from "./board";
 import { DECKS, type DeckId } from "./cards";
 import { MAX_PLAYERS, MIN_PLAYERS, type RuleConfig } from "./config";
+import { checkAction } from "./legal";
 import { nextInt, seedRng, shuffle } from "./rng";
+import {
+  activePlayers,
+  currentPlayer,
+  levelAfterSale,
+  liquidationValue,
+  mortgageValue,
+  sealedTransferFee,
+  tradeProblem,
+  unsealCost,
+  WALKER,
+} from "./rules";
 import {
   type Account,
   type Action,
   type ApplyResult,
+  type DebtContinuation,
   type GameEvent,
   type GameState,
   type PlayerId,
   type PlayerState,
-  type RuleError,
   STATE_SCHEMA_VERSION,
+  type Trade,
+  type TradeBundle,
   type TransferReason,
 } from "./state";
-
-export const WALKER = 5;
 
 export type NewPlayer = { id: PlayerId; name: string };
 
@@ -64,49 +76,17 @@ export function createGame(
     })),
     owners: board.spaces.map(() => null),
     buildings: board.spaces.map(() => 0),
+    sealed: board.spaces.map(() => false),
     decks,
     urn: 0,
     turn: { playerIndex: 0, number: 1, doublesCount: 0, extraRoll: false, lastRoll: null },
     phase: { kind: "awaitingRoll" },
+    debts: [],
+    auctionQueue: [],
+    trades: [],
+    nextTradeId: 1,
     rng,
   };
-}
-
-/** The parts of the state that turn and legality logic need; satisfied by the public view too. */
-export type TurnView = Pick<GameState, "phase" | "players" | "turn" | "config">;
-
-export function currentPlayer(state: TurnView): PlayerState {
-  const player = state.players[state.turn.playerIndex];
-  if (!player) throw new Error("turn points at a missing player");
-  return player;
-}
-
-export function activePlayers(state: Pick<GameState, "players">): PlayerState[] {
-  return state.players.filter((p) => !p.bankrupt);
-}
-
-/** Every action `playerId` may take right now. The UI enables exactly these. */
-export function getLegalActions(state: TurnView, playerId: PlayerId): Action[] {
-  if (state.phase.kind === "gameOver") return [];
-  const player = currentPlayer(state);
-  if (player.id !== playerId || player.bankrupt) return [];
-
-  switch (state.phase.kind) {
-    case "awaitingRoll": {
-      const actions: Action[] = [{ type: "roll" }];
-      if (player.inJail && player.cash >= state.config.jailFine)
-        actions.push({ type: "payJailFine" });
-      if (player.inJail && player.getOutCards.length > 0) actions.push({ type: "useGetOutCard" });
-      return actions;
-    }
-    case "awaitingBuy": {
-      const space = getBoard(state.config.boardId).spaces[state.phase.space];
-      const price = space && "price" in space ? space.price : Number.POSITIVE_INFINITY;
-      return player.cash >= price ? [{ type: "buy" }, { type: "decline" }] : [{ type: "decline" }];
-    }
-    case "awaitingEndTurn":
-      return [{ type: "endTurn" }];
-  }
 }
 
 /**
@@ -119,28 +99,13 @@ export function applyAction(
   action: Action,
   options: ApplyOptions = {},
 ): ApplyResult {
-  const error = validate(state, playerId, action);
+  const error = checkAction(state, playerId, action);
   if (error) return { ok: false, error };
 
   // State is plain JSON by contract, so a JSON round-trip is a faithful deep copy.
   const game = new Game(JSON.parse(JSON.stringify(state)) as GameState, options);
-  game.dispatch(action);
+  game.dispatch(playerId, action);
   return { ok: true, state: game.state, events: game.events };
-}
-
-function validate(state: GameState, playerId: PlayerId, action: Action): RuleError | null {
-  if (state.phase.kind === "gameOver") return { code: "game_over", message: "The game is over" };
-  const player = state.players.find((p) => p.id === playerId);
-  if (!player || player.bankrupt) {
-    return { code: "unknown_player", message: "You are not playing in this game" };
-  }
-  if (currentPlayer(state).id !== playerId) {
-    return { code: "not_your_turn", message: "It is not your turn" };
-  }
-  if (!getLegalActions(state, playerId).some((a) => a.type === action.type)) {
-    return { code: "illegal_action", message: `Cannot ${action.type} right now` };
-  }
-  return null;
 }
 
 type LandingOptions = {
@@ -150,7 +115,10 @@ type LandingOptions = {
   utilityMultiplier?: number;
 };
 
-/** Mutable working copy for a single action. */
+/** Placeholder phase while an action resolves; `settle` replaces it. */
+const RESOLVING = { kind: "awaitingEndTurn" } as const;
+
+/** Mutable working copy for a single, already validated action. */
 class Game {
   readonly events: GameEvent[] = [];
   private readonly board: BoardDefinition;
@@ -166,40 +134,111 @@ class Game {
     return currentPlayer(this.state);
   }
 
-  dispatch(action: Action): void {
+  private player(id: PlayerId): PlayerState {
+    const player = this.state.players.find((p) => p.id === id);
+    if (!player) throw new Error(`unknown player ${id}`);
+    return player;
+  }
+
+  dispatch(actorId: PlayerId, action: Action): void {
+    const actor = this.player(actorId);
     switch (action.type) {
       case "roll":
         this.roll();
         this.settle();
-        return;
-      case "payJailFine": {
-        const p = this.current;
-        this.transfer(p.id, this.feeAccount(), this.state.config.jailFine, "jailFine");
-        this.leaveJail(p, "fine");
-        return;
-      }
+        break;
+      case "payJailFine":
+        this.transfer(actor.id, this.feeAccount(), this.state.config.jailFine, "jailFine");
+        this.leaveJail(actor, "fine");
+        break;
       case "useGetOutCard": {
-        const p = this.current;
-        const deck = p.getOutCards.shift();
+        const deck = actor.getOutCards.shift();
         if (!deck) throw new Error("no get-out card to use");
         this.returnGetOutCard(deck);
-        this.leaveJail(p, "card");
-        return;
+        this.leaveJail(actor, "card");
+        break;
       }
       case "buy":
-        this.buy();
+        this.buy(actor);
         this.settle();
-        return;
-      case "decline":
-        if (this.state.phase.kind !== "awaitingBuy") throw new Error("decline outside awaitingBuy");
-        this.emit({ type: "declined", playerId: this.current.id, space: this.state.phase.space });
-        this.state.phase = { kind: "awaitingEndTurn" };
+        break;
+      case "decline": {
+        const space = this.requireBuyPhase();
+        this.emit({ type: "declined", playerId: actor.id, space });
+        this.state.phase = RESOLVING;
+        if (this.state.config.auctions) this.startAuction(space);
         this.settle();
-        return;
+        break;
+      }
       case "endTurn":
         this.passTurn();
-        return;
+        break;
+      case "build":
+        this.build(actor, action.space);
+        break;
+      case "sellBuilding":
+        this.sellBuilding(actor, action.space);
+        break;
+      case "seal":
+        this.state.sealed[action.space] = true;
+        this.transfer("bank", actor.id, mortgageValue(this.board, action.space), "seal");
+        this.emit({ type: "sealed", playerId: actor.id, space: action.space });
+        break;
+      case "unseal":
+        this.transfer(actor.id, "bank", unsealCost(this.board, action.space), "unseal");
+        this.state.sealed[action.space] = false;
+        this.emit({ type: "unsealed", playerId: actor.id, space: action.space });
+        break;
+      case "bid":
+        this.bid(actor, action.amount);
+        break;
+      case "passAuction":
+        this.passAuction(actor);
+        break;
+      case "payDebt":
+        this.payDebt();
+        break;
+      case "declareBankruptcy": {
+        const debt = this.state.debts[0];
+        if (!debt) throw new Error("no debt to default on");
+        this.bankrupt(actor, debt.creditor === "urn" ? "bank" : debt.creditor);
+        if (this.state.phase.kind !== "gameOver") this.state.phase = RESOLVING;
+        this.settle();
+        break;
+      }
+      case "proposeTrade": {
+        const trade = {
+          id: this.state.nextTradeId++,
+          from: actor.id,
+          to: action.to,
+          offer: copyBundle(action.offer),
+          request: copyBundle(action.request),
+        };
+        this.state.trades.push(trade);
+        this.emit({ type: "tradeProposed", trade });
+        break;
+      }
+      case "acceptTrade":
+        this.executeTrade(action.tradeId);
+        break;
+      case "rejectTrade": {
+        const { from, to } = this.removeTrade(action.tradeId);
+        this.emit({ type: "tradeRejected", tradeId: action.tradeId, from, to });
+        break;
+      }
+      case "cancelTrade": {
+        const { from, to } = this.removeTrade(action.tradeId);
+        this.emit({
+          type: "tradeCancelled",
+          tradeId: action.tradeId,
+          from,
+          to,
+          reason: "withdrawn",
+        });
+        break;
+      }
     }
+    this.pruneTrades();
   }
 
   // ---------- Turn flow ----------
@@ -217,14 +256,16 @@ class Game {
     if (p.inJail) {
       if (doubles) {
         this.leaveJail(p, "doubles");
-      } else {
-        p.jailAttempts++;
-        if (p.jailAttempts < config.maxJailTurns) return;
-        if (!this.payFee(p, config.jailFine, "jailFine")) return;
-        this.leaveJail(p, "fine");
+        // Leaving jail never grants an extra roll.
+        this.moveForward(p, a + b);
+        return;
       }
-      // Leaving jail by any route never grants an extra roll.
-      this.moveForward(p, a + b);
+      p.jailAttempts++;
+      if (p.jailAttempts < config.maxJailTurns) return;
+      this.charge(p, this.feeAccount(), config.jailFine, "jailFine", {
+        kind: "leaveJailAndMove",
+        steps: a + b,
+      });
       return;
     }
 
@@ -239,10 +280,24 @@ class Game {
     this.moveForward(p, a + b);
   }
 
-  /** Chooses the next phase once the current roll has fully resolved. */
+  /**
+   * Chooses the next phase once everything triggered by an action has resolved:
+   * debts first, then pending auctions, then the turn itself.
+   */
   private settle(): void {
     const { phase, turn } = this.state;
-    if (phase.kind === "gameOver" || phase.kind === "awaitingBuy") return;
+    if (phase.kind === "gameOver" || phase.kind === "awaitingBuy" || phase.kind === "auction") {
+      return;
+    }
+    if (this.state.debts.length > 0) {
+      this.state.phase = { kind: "raisingFunds" };
+      return;
+    }
+    while (this.state.auctionQueue.length > 0) {
+      const space = this.state.auctionQueue.shift() as number;
+      this.startAuction(space);
+      if (this.state.phase.kind === "auction") return;
+    }
     const p = this.current;
     if (p.bankrupt) {
       this.passTurn();
@@ -344,13 +399,13 @@ class Game {
         const owner = this.state.owners[index];
         if (owner === null || owner === undefined) {
           this.state.phase = { kind: "awaitingBuy", space: index };
-        } else if (owner !== p.id) {
-          this.pay(p, owner, this.rent(index, landing), "rent");
+        } else if (owner !== p.id && !this.state.sealed[index]) {
+          this.charge(p, owner, this.rent(index, landing), "rent");
         }
         return;
       }
       case "tax":
-        this.payFee(p, space.amount, "tax");
+        this.charge(p, this.feeAccount(), space.amount, "tax");
         return;
       case "card":
         this.drawCard(p, space.deck);
@@ -405,16 +460,102 @@ class Game {
     }
   }
 
-  private buy(): void {
+  private requireBuyPhase(): number {
     const { phase } = this.state;
-    if (phase.kind !== "awaitingBuy") throw new Error("buy outside awaitingBuy");
-    const space = this.board.spaces[phase.space];
-    if (!space || !("price" in space)) throw new Error(`space ${phase.space} is not for sale`);
-    const p = this.current;
+    if (phase.kind !== "awaitingBuy") throw new Error("not deciding on a purchase");
+    return phase.space;
+  }
+
+  private buy(p: PlayerState): void {
+    const index = this.requireBuyPhase();
+    const space = this.board.spaces[index];
+    if (!space || !("price" in space)) throw new Error(`space ${index} is not for sale`);
     this.transfer(p.id, "bank", space.price, "purchase");
-    this.state.owners[phase.space] = p.id;
-    this.emit({ type: "bought", playerId: p.id, space: phase.space, price: space.price });
-    this.state.phase = { kind: "awaitingEndTurn" };
+    this.state.owners[index] = p.id;
+    this.emit({ type: "bought", playerId: p.id, space: index, price: space.price });
+    this.state.phase = RESOLVING;
+  }
+
+  // ---------- Buildings ----------
+
+  private build(p: PlayerState, index: number): void {
+    const space = this.board.spaces[index];
+    if (space?.kind !== "property") throw new Error(`cannot build on ${index}`);
+    this.transfer(p.id, "bank", space.buildCost, "building");
+    this.state.buildings[index] = (this.state.buildings[index] ?? 0) + 1;
+    this.emit({
+      type: "built",
+      playerId: p.id,
+      space: index,
+      buildings: this.state.buildings[index] ?? 0,
+    });
+  }
+
+  private sellBuilding(p: PlayerState, index: number): void {
+    const space = this.board.spaces[index];
+    if (space?.kind !== "property") throw new Error(`no buildings on ${index}`);
+    const before = this.state.buildings[index] ?? 0;
+    const after = levelAfterSale(this.state, this.board, index);
+    this.state.buildings[index] = after;
+    // Buildings sell back to the bank at half their cost.
+    this.transfer("bank", p.id, Math.floor(((before - after) * space.buildCost) / 2), "building");
+    this.emit({ type: "soldBuilding", playerId: p.id, space: index, buildings: after });
+  }
+
+  // ---------- Auctions ----------
+
+  private startAuction(space: number): void {
+    const players = this.state.players;
+    const start = this.state.turn.playerIndex;
+    const bidders = players
+      .map((_, i) => players[(start + i) % players.length] as PlayerState)
+      .filter((p) => !p.bankrupt && p.cash > 0)
+      .map((p) => p.id);
+    this.emit({ type: "auctionStarted", space });
+    if (bidders.length === 0) {
+      this.emit({ type: "auctionUnsold", space });
+      return;
+    }
+    this.state.phase = { kind: "auction", space, highBid: 0, highBidder: null, bidders };
+  }
+
+  private bid(p: PlayerState, amount: number): void {
+    const { phase } = this.state;
+    if (phase.kind !== "auction") throw new Error("no auction");
+    phase.highBid = amount;
+    phase.highBidder = p.id;
+    this.emit({ type: "bid", playerId: p.id, amount });
+    this.checkAuctionEnd();
+  }
+
+  private passAuction(p: PlayerState): void {
+    const { phase } = this.state;
+    if (phase.kind !== "auction") throw new Error("no auction");
+    phase.bidders = phase.bidders.filter((id) => id !== p.id);
+    this.emit({ type: "passedAuction", playerId: p.id });
+    this.checkAuctionEnd();
+  }
+
+  private checkAuctionEnd(): void {
+    const { phase } = this.state;
+    if (phase.kind !== "auction") return;
+    if (phase.bidders.length === 0) {
+      this.emit({ type: "auctionUnsold", space: phase.space });
+    } else if (phase.bidders.length === 1 && phase.highBidder === phase.bidders[0]) {
+      const winner = this.player(phase.highBidder);
+      this.transfer(winner.id, "bank", phase.highBid, "auction");
+      this.state.owners[phase.space] = winner.id;
+      this.emit({
+        type: "auctionWon",
+        playerId: winner.id,
+        space: phase.space,
+        price: phase.highBid,
+      });
+    } else {
+      return;
+    }
+    this.state.phase = RESOLVING;
+    this.settle();
   }
 
   // ---------- Cards ----------
@@ -461,22 +602,18 @@ class Game {
         this.transfer("bank", p.id, effect.amount, "card");
         return;
       case "pay":
-        this.payFee(p, effect.amount, "card");
+        this.charge(p, this.feeAccount(), effect.amount, "card");
         return;
       case "collectFromEach":
         for (const other of activePlayers(this.state)) {
-          if (other.id !== p.id) this.pay(other, p.id, effect.amount, "card");
+          if (other.id !== p.id) this.charge(other, p.id, effect.amount, "card");
         }
         return;
-      case "payEach": {
-        const others = activePlayers(this.state).filter((o) => o.id !== p.id);
-        if (p.cash < effect.amount * others.length) {
-          this.bankrupt(p, "bank");
-          return;
+      case "payEach":
+        for (const other of activePlayers(this.state)) {
+          if (other.id !== p.id && !p.bankrupt) this.charge(p, other.id, effect.amount, "card");
         }
-        for (const other of others) this.transfer(p.id, other.id, effect.amount, "card");
         return;
-      }
       case "repairs": {
         let owed = 0;
         this.state.owners.forEach((owner, i) => {
@@ -484,7 +621,7 @@ class Game {
           const count = this.state.buildings[i] ?? 0;
           owed += count === WALKER ? effect.perWalker : count * effect.perGuardian;
         });
-        this.payFee(p, owed, "card");
+        this.charge(p, this.feeAccount(), owed, "card");
         return;
       }
     }
@@ -496,36 +633,61 @@ class Game {
     this.state.decks[deckId].drawPile.push(index);
   }
 
-  // ---------- Money ----------
+  // ---------- Money and debts ----------
 
   /** Taxes, fines and card fees feed the Soul Urn when the jackpot rule is on. */
   private feeAccount(): Account {
     return this.state.config.freeParkingJackpot ? "urn" : "bank";
   }
 
-  private payFee(p: PlayerState, amount: number, reason: TransferReason): boolean {
-    if (amount <= 0) return true;
-    if (p.cash < amount) {
-      this.bankrupt(p, "bank");
-      return false;
-    }
-    this.transfer(p.id, this.feeAccount(), amount, reason);
-    return true;
+  private owedBy(id: PlayerId): number {
+    return this.state.debts.filter((d) => d.debtor === id).reduce((sum, d) => sum + d.amount, 0);
   }
 
   /**
-   * Pays another player, or goes bankrupt to them when cash runs short. Selling
-   * and mortgaging to raise funds are not part of the rules yet, so a shortfall
-   * is immediately fatal.
+   * Collects a payment. Paid at once from cash when possible; otherwise recorded
+   * as a debt the debtor must raise by selling and sealing, or immediate
+   * bankruptcy when even that could not cover it.
    */
-  private pay(from: PlayerState, to: PlayerId, amount: number, reason: TransferReason): boolean {
-    if (amount <= 0) return true;
-    if (from.cash < amount) {
-      this.bankrupt(from, to);
-      return false;
+  private charge(
+    debtor: PlayerState,
+    creditor: Account,
+    amount: number,
+    reason: TransferReason,
+    then?: DebtContinuation,
+  ): void {
+    if (debtor.bankrupt) return;
+    const alreadyOwed = this.owedBy(debtor.id);
+    if (alreadyOwed === 0 && debtor.cash >= amount) {
+      this.transfer(debtor.id, creditor, amount, reason);
+      if (then) this.continueAfterDebt(debtor, then);
+      return;
     }
-    this.transfer(from.id, to, amount, reason);
-    return true;
+    if (liquidationValue(this.state, this.board, debtor.id) >= alreadyOwed + amount) {
+      this.state.debts.push({ debtor: debtor.id, creditor, amount, reason, ...(then && { then }) });
+      this.emit({ type: "debtOwed", debtor: debtor.id, creditor, amount });
+      return;
+    }
+    this.bankrupt(debtor, creditor === "urn" ? "bank" : creditor);
+  }
+
+  private payDebt(): void {
+    const debt = this.state.debts.shift();
+    if (!debt) throw new Error("no debt to pay");
+    const debtor = this.player(debt.debtor);
+    this.transfer(debtor.id, debt.creditor, debt.amount, debt.reason);
+    this.state.phase = RESOLVING;
+    if (debt.then) this.continueAfterDebt(debtor, debt.then);
+    this.settle();
+  }
+
+  private continueAfterDebt(p: PlayerState, then: DebtContinuation): void {
+    switch (then.kind) {
+      case "leaveJailAndMove":
+        this.leaveJail(p, "fine");
+        this.moveForward(p, then.steps);
+        return;
+    }
   }
 
   private transfer(from: Account, to: Account, amount: number, reason: TransferReason): void {
@@ -540,19 +702,16 @@ class Game {
     if (account === "bank") return;
     if (account === "urn") {
       this.state.urn += delta;
-    } else {
-      const player = this.state.players.find((p) => p.id === account);
-      if (!player) throw new Error(`unknown account ${account}`);
-      player.cash += delta;
+      if (this.state.urn < 0) throw new Error("transfer overdrew the urn");
+      return;
     }
-    if (this.state.urn < 0 || this.state.players.some((p) => p.cash < 0)) {
-      throw new Error(`transfer overdrew ${account}`);
-    }
+    const player = this.player(account);
+    player.cash += delta;
+    if (player.cash < 0) throw new Error(`transfer overdrew ${account}`);
   }
 
   private bankrupt(p: PlayerState, creditor: PlayerId | "bank"): void {
-    const heir = creditor === "bank" ? null : this.state.players.find((o) => o.id === creditor);
-    if (creditor !== "bank" && !heir) throw new Error(`unknown creditor ${creditor}`);
+    const heir = creditor === "bank" ? null : this.player(creditor);
 
     this.state.owners.forEach((owner, i) => {
       if (owner !== p.id) return;
@@ -563,7 +722,15 @@ class Game {
         this.transfer("bank", p.id, Math.floor((space.buildCost * buildings) / 2), "bankruptcy");
       }
       this.state.buildings[i] = 0;
-      this.state.owners[i] = heir ? heir.id : null;
+      if (heir) {
+        // Sealed properties pass on still Sealed; the usual transfer interest is waived.
+        this.state.owners[i] = heir.id;
+      } else {
+        // The bank cancels mortgages and auctions everything off.
+        this.state.owners[i] = null;
+        this.state.sealed[i] = false;
+        if (this.state.config.auctions) this.state.auctionQueue.push(i);
+      }
     });
     this.transfer(p.id, heir ? heir.id : "bank", p.cash, "bankruptcy");
     if (heir) heir.getOutCards.push(...p.getOutCards);
@@ -573,16 +740,80 @@ class Game {
     p.inJail = false;
     p.jailAttempts = 0;
     p.bankrupt = true;
+    this.state.debts = this.state.debts.filter((d) => d.debtor !== p.id && d.creditor !== p.id);
     this.emit({ type: "bankrupt", playerId: p.id, creditor });
 
     const remaining = activePlayers(this.state);
     if (remaining.length === 1 && remaining[0]) {
+      this.state.debts = [];
+      this.state.auctionQueue = [];
       this.state.phase = { kind: "gameOver", winnerId: remaining[0].id };
       this.emit({ type: "gameOver", winnerId: remaining[0].id });
+    }
+  }
+
+  // ---------- Trades ----------
+
+  private removeTrade(id: number): Trade {
+    const trade = this.state.trades.find((t) => t.id === id);
+    if (!trade) throw new Error(`no trade ${id}`);
+    this.state.trades = this.state.trades.filter((t) => t.id !== id);
+    return trade;
+  }
+
+  private executeTrade(id: number): void {
+    const trade = this.removeTrade(id);
+    const from = this.player(trade.from);
+    const to = this.player(trade.to);
+
+    const give = (giver: PlayerState, receiver: PlayerState, bundle: TradeBundle) => {
+      this.transfer(giver.id, receiver.id, bundle.cash, "trade");
+      for (const space of bundle.spaces) this.state.owners[space] = receiver.id;
+      for (const deck of bundle.getOutCards) {
+        giver.getOutCards.splice(giver.getOutCards.indexOf(deck), 1);
+        receiver.getOutCards.push(deck);
+      }
+    };
+    give(from, to, trade.offer);
+    give(to, from, trade.request);
+
+    const payInterest = (receiver: PlayerState, spaces: number[]) => {
+      for (const space of spaces) {
+        if (this.state.sealed[space]) {
+          this.transfer(receiver.id, "bank", sealedTransferFee(this.board, space), "trade");
+        }
+      }
+    };
+    payInterest(to, trade.offer.spaces);
+    payInterest(from, trade.request.spaces);
+    this.emit({ type: "tradeAccepted", tradeId: id, from: from.id, to: to.id });
+  }
+
+  /** Drops offers that can no longer be executed, so players never see stale deals. */
+  private pruneTrades(): void {
+    for (const trade of [...this.state.trades]) {
+      if (tradeProblem(this.state, this.board, trade) !== null) {
+        this.removeTrade(trade.id);
+        this.emit({
+          type: "tradeCancelled",
+          tradeId: trade.id,
+          from: trade.from,
+          to: trade.to,
+          reason: "invalid",
+        });
+      }
     }
   }
 
   private emit(event: GameEvent): void {
     this.events.push(event);
   }
+}
+
+function copyBundle(bundle: TradeBundle): TradeBundle {
+  return {
+    cash: bundle.cash,
+    spaces: [...bundle.spaces],
+    getOutCards: [...bundle.getOutCards],
+  };
 }

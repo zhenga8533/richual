@@ -15,9 +15,11 @@ type Props = {
   game: PublicGameState;
   players: LobbyPlayer[];
   myId: string | null;
+  selected: number | null;
+  onSelect: (space: number) => void;
 };
 
-export function Board({ game, players, myId }: Props) {
+export function Board({ game, players, myId, selected, onSelect }: Props) {
   const board = getBoard(game.config.boardId);
   const seatOf = (id: string) => players.find((p) => p.id === id)?.seat ?? 0;
   const lobbyPlayer = (id: string) => players.find((p) => p.id === id);
@@ -45,6 +47,9 @@ export function Board({ game, players, myId }: Props) {
             ownerColor={owner ? seatColor(seatOf(owner)) : null}
             ownerName={owner ? (lobbyPlayer(owner)?.name ?? "") : null}
             buildings={game.buildings[index] ?? 0}
+            sealed={game.sealed[index] ?? false}
+            selected={selected === index}
+            onSelect={() => onSelect(index)}
             tokens={here.map((p) => ({
               id: p.id,
               name: p.name,
@@ -97,6 +102,9 @@ function SpaceCell({
   ownerColor,
   ownerName,
   buildings,
+  sealed,
+  selected,
+  onSelect,
   tokens,
 }: {
   space: Space;
@@ -105,6 +113,9 @@ function SpaceCell({
   ownerColor: string | null;
   ownerName: string | null;
   buildings: number;
+  sealed: boolean;
+  selected: boolean;
+  onSelect: () => void;
   tokens: Token[];
 }) {
   const band = space.kind === "property" ? GROUP_COLORS[space.group] : null;
@@ -112,21 +123,26 @@ function SpaceCell({
     space.name,
     "price" in space ? `price ${space.price} ${SOULS}` : null,
     ownerName ? `owned by ${ownerName}` : null,
+    sealed ? "sealed" : null,
     tokens.length ? `here: ${tokens.map((t) => t.name).join(", ")}` : null,
   ]
     .filter(Boolean)
     .join(", ");
 
   return (
-    <div
-      className="relative flex min-h-0 min-w-0 flex-col overflow-hidden bg-smoke-light/90 text-[clamp(6px,0.75vw,11px)] leading-tight"
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-pressed={selected}
+      className={`relative flex min-h-0 min-w-0 flex-col overflow-hidden bg-smoke-light/90 text-left text-[clamp(6px,0.75vw,11px)] leading-tight hover:bg-smoke-light ${
+        selected ? "z-10 outline-2 outline-amber" : ""
+      } ${sealed ? "opacity-60" : ""}`}
       style={{
         gridRow: row,
         gridColumn: col,
         boxShadow: ownerColor ? `inset 0 -4px 0 ${ownerColor}` : undefined,
       }}
       title={description}
-      role="img"
       aria-label={description}
     >
       {band && <div className="h-[18%] shrink-0" style={{ background: band }} />}
@@ -137,6 +153,7 @@ function SpaceCell({
             {buildings === WALKER ? "Walker" : "▲".repeat(buildings)}
           </span>
         )}
+        {sealed && <span className="text-blood">Sealed</span>}
         {isOwnable(space) && !ownerColor && (
           <span className="tabular-nums text-parchment-dim">
             {space.price}
@@ -159,7 +176,7 @@ function SpaceCell({
           ))}
         </div>
       )}
-    </div>
+    </button>
   );
 }
 

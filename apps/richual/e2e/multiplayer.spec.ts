@@ -77,3 +77,35 @@ test("a third player cannot join a game in progress", async ({ browser }) => {
   await late.getByRole("button", { name: "Join" }).click();
   await expect(late.getByRole("alert")).toHaveText("This game has already started");
 });
+
+test("declining a property starts an auction both players see", async ({ browser }) => {
+  const host = await newPlayer(browser);
+  const guest = await newPlayer(browser);
+  const url = await createLobby(host, "Host");
+  await joinLobby(guest, url, "Guest");
+  await host.getByRole("button", { name: "Begin the ritual" }).click();
+
+  const turnButton = (p: Page) =>
+    p.getByRole("button", { name: /^(Roll dice|End turn|Pass to auction)$/ }).first();
+  for (let step = 0; step < 40; step++) {
+    await expect
+      .poll(
+        async () => (await turnButton(host).isVisible()) || (await turnButton(guest).isVisible()),
+      )
+      .toBe(true);
+    const current = (await turnButton(host).isVisible()) ? host : guest;
+    const pass = current.getByRole("button", { name: "Pass to auction" });
+    if (await pass.isVisible()) {
+      await pass.click();
+      await expect(host.getByRole("heading", { name: /^Auction:/ })).toBeVisible();
+      await expect(guest.getByRole("heading", { name: /^Auction:/ })).toBeVisible();
+      return;
+    }
+    const logLines = current.locator('section[aria-labelledby="game-log"] li');
+    const before = await logLines.count();
+    await turnButton(current).click();
+    // Wait for this action's result before looking for the next button.
+    await expect.poll(() => logLines.count()).toBeGreaterThan(before);
+  }
+  throw new Error("no unowned property was landed on in 40 steps");
+});

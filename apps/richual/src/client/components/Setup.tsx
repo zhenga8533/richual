@@ -102,6 +102,18 @@ export function Setup({ lobby }: { lobby: LobbySnapshot }) {
           disabled={!isHost}
           onChange={(freeParkingJackpot) => updateSettings({ freeParkingJackpot })}
         />
+        <Toggle
+          label="Auction properties nobody buys"
+          checked={lobby.settings.auctions}
+          disabled={!isHost}
+          onChange={(auctions) => updateSettings({ auctions })}
+        />
+        <Toggle
+          label="Build evenly, from a limited supply of Guardians and Walkers"
+          checked={lobby.settings.evenBuilding}
+          disabled={!isHost}
+          onChange={(evenBuilding) => updateSettings({ evenBuilding })}
+        />
         {!isHost && <p className="text-xs text-parchment-dim">Only the host can change rules.</p>}
       </section>
 

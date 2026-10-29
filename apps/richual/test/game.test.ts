@@ -66,7 +66,13 @@ describe("lobby setup", () => {
 
   it("only lets the host change settings", async () => {
     const { host, guest } = await twoPlayerLobby();
-    const settings = { startingCash: 2000, doubleOnExactGo: false, freeParkingJackpot: false };
+    const settings = {
+      startingCash: 2000,
+      doubleOnExactGo: false,
+      freeParkingJackpot: false,
+      auctions: false,
+      evenBuilding: false,
+    };
     guest.send({ type: "updateSettings", settings });
     expect(await guest.until("error")).toMatchObject({ error: "forbidden" });
 
@@ -110,7 +116,13 @@ describe("starting a game", () => {
     const setup = await twoPlayerLobby();
     setup.host.send({
       type: "updateSettings",
-      settings: { startingCash: 2000, doubleOnExactGo: true, freeParkingJackpot: true },
+      settings: {
+        startingCash: 2000,
+        doubleOnExactGo: true,
+        freeParkingJackpot: true,
+        auctions: true,
+        evenBuilding: true,
+      },
     });
     await setup.guest.until("lobby");
     setup.host.send({ type: "startGame" });
@@ -199,6 +211,52 @@ describe("game actions", () => {
     expect(restored.version).toBe(after.version);
     expect(restored.game).toEqual(after.game);
   }, 20_000);
+});
+
+describe("off-turn actions", () => {
+  it("lets a player outside the turn propose a trade the current player accepts", async () => {
+    const { lobby, current, other, hostSession } = await startedGame();
+    // Give the waiting player a property to trade, straight in storage.
+    await runInDurableObject(env.LOBBY.getByName(hostSession.code), (_, state) => {
+      const row = state.storage.sql
+        .exec<{ state_json: string }>("SELECT state_json FROM game")
+        .one();
+      const game = JSON.parse(row.state_json);
+      game.owners[39] = other.id;
+      state.storage.sql.exec("UPDATE game SET state_json = ?", JSON.stringify(game));
+    });
+
+    other.socket.send({
+      type: "action",
+      clientActionId: crypto.randomUUID(),
+      expectedVersion: lobby.version,
+      action: {
+        type: "proposeTrade",
+        to: current.id,
+        offer: { cash: 0, spaces: [39], getOutCards: [] },
+        request: { cash: 300, spaces: [], getOutCards: [] },
+      },
+    });
+    const proposed = await current.socket.until("lobby");
+    expect(proposed.lobby.game?.trades).toHaveLength(1);
+
+    current.socket.send({
+      type: "action",
+      clientActionId: crypto.randomUUID(),
+      expectedVersion: proposed.lobby.version,
+      action: { type: "acceptTrade", tradeId: 1 },
+    });
+    let traded = await other.socket.until("lobby");
+    while (traded.lobby.version <= proposed.lobby.version)
+      traded = await other.socket.until("lobby");
+    expect(traded.lobby.game?.owners[39]).toBe(current.id);
+    expect(traded.events).toContainEqual({
+      type: "tradeAccepted",
+      tradeId: 1,
+      from: other.id,
+      to: current.id,
+    });
+  });
 });
 
 describe("after a game", () => {

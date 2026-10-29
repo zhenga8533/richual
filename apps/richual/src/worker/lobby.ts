@@ -7,7 +7,7 @@ import {
   type GameEvent,
   type GameState,
   HERO_IDS,
-  STATE_SCHEMA_VERSION,
+  migrateState,
   toPublicState,
 } from "@richual/engine";
 import {
@@ -279,7 +279,7 @@ export class LobbyDO extends DurableObject<Env> {
     const seed = crypto.getRandomValues(new Uint32Array(1))[0] ?? 0;
     const state = createGame(
       players.map((p) => ({ id: p.id, name: p.name })),
-      { ...CLASSIC_RULES, ...settings },
+      { ...CLASSIC_RULES, ...settings, limitedBuildings: settings.evenBuilding },
       seed,
     );
     const now = Date.now();
@@ -418,11 +418,7 @@ export class LobbyDO extends DurableObject<Env> {
       .exec<{ state_json: string }>("SELECT state_json FROM game WHERE id = 1")
       .toArray()[0];
     if (!row) throw new Error("lobby is playing but has no game row");
-    const state = JSON.parse(row.state_json) as GameState;
-    if (state.schemaVersion !== STATE_SCHEMA_VERSION) {
-      throw new Error(`no migration from game state v${state.schemaVersion}`);
-    }
-    return state;
+    return migrateState(JSON.parse(row.state_json));
   }
 
   private insertPlayer(id: string, name: string, seat: number, tokenHash: string, now: number) {

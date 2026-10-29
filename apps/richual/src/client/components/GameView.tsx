@@ -1,14 +1,18 @@
-import { type Action, getBoard, getLegalActions, type PublicGameState } from "@richual/engine";
+import { getBoard, type PublicGameState } from "@richual/engine";
 import type { LobbySnapshot } from "@richual/protocol";
-import { useEffect, useRef } from "react";
-import { type LoggedEvent, send, sendAction, useConnection } from "../connection";
+import { useEffect, useRef, useState } from "react";
+import { type LoggedEvent, send, useConnection } from "../connection";
 import { describeEvent } from "../describe";
 import { initials, SOULS, seatColor } from "../theme";
+import { ActionPanel } from "./ActionPanel";
 import { Board } from "./Board";
 import { heroLabel } from "./heroLabel";
+import { PropertyPanel } from "./PropertyPanel";
+import { TradePanel } from "./TradePanel";
 
 export function GameView({ lobby, game }: { lobby: LobbySnapshot; game: PublicGameState }) {
-  const { playerId, log, pendingActionId } = useConnection();
+  const { playerId, log } = useConnection();
+  const [selected, setSelected] = useState<number | null>(null);
   const current = game.players[game.turn.playerIndex];
   const myTurn = game.phase.kind !== "gameOver" && current?.id === playerId;
 
@@ -22,82 +26,33 @@ export function GameView({ lobby, game }: { lobby: LobbySnapshot; game: PublicGa
   return (
     <div className="grid w-full max-w-7xl gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
       <div className="mx-auto w-full max-w-[min(100%,calc(100dvh-7rem))]">
-        <Board game={game} players={lobby.players} myId={playerId} />
+        <Board
+          game={game}
+          players={lobby.players}
+          myId={playerId}
+          selected={selected}
+          onSelect={(space) => setSelected(space === selected ? null : space)}
+        />
       </div>
       <aside className="flex min-w-0 flex-col gap-4">
         {game.phase.kind === "gameOver" ? (
           <GameOver lobby={lobby} game={game} winnerId={game.phase.winnerId} />
         ) : (
-          <ActionPanel game={game} myTurn={myTurn} pending={pendingActionId !== null} />
+          <ActionPanel lobby={lobby} game={game} />
+        )}
+        {selected !== null && (
+          <PropertyPanel
+            lobby={lobby}
+            game={game}
+            space={selected}
+            onClose={() => setSelected(null)}
+          />
         )}
         <Players lobby={lobby} game={game} />
+        {game.phase.kind !== "gameOver" && <TradePanel lobby={lobby} game={game} />}
         <EventLog log={log} lobby={lobby} game={game} />
       </aside>
     </div>
-  );
-}
-
-function actionLabel(action: Action, game: PublicGameState): string {
-  const board = getBoard(game.config.boardId);
-  switch (action.type) {
-    case "roll":
-      return "Roll dice";
-    case "buy": {
-      const space = game.phase.kind === "awaitingBuy" ? board.spaces[game.phase.space] : undefined;
-      return space && "price" in space ? `Buy for ${space.price} ${SOULS}` : "Buy";
-    }
-    case "decline":
-      return "Pass";
-    case "endTurn":
-      return "End turn";
-    case "payJailFine":
-      return `Pay ${game.config.jailFine} ${SOULS} fine`;
-    case "useGetOutCard":
-      return "Use escape card";
-  }
-}
-
-function ActionPanel({
-  game,
-  myTurn,
-  pending,
-}: {
-  game: PublicGameState;
-  myTurn: boolean;
-  pending: boolean;
-}) {
-  const { playerId } = useConnection();
-  const current = game.players[game.turn.playerIndex];
-  const actions = playerId ? getLegalActions(game, playerId) : [];
-  const board = getBoard(game.config.boardId);
-  const offered = game.phase.kind === "awaitingBuy" ? board.spaces[game.phase.space] : undefined;
-
-  return (
-    <section className="panel flex flex-col gap-3 p-4" aria-label="Your actions">
-      {myTurn ? (
-        <>
-          <h2 className="font-display text-xl text-brass">Your turn</h2>
-          {offered && <p className="text-sm">{offered.name} is unowned.</p>}
-          <div className="flex flex-wrap gap-2">
-            {actions.map((action, i) => (
-              <button
-                key={action.type}
-                type="button"
-                className={i === 0 ? "btn-primary" : "btn-ghost"}
-                disabled={pending}
-                onClick={() => sendAction(action)}
-              >
-                {actionLabel(action, game)}
-              </button>
-            ))}
-          </div>
-        </>
-      ) : (
-        <p className="text-sm text-parchment-dim" aria-live="polite">
-          Waiting for <span className="text-parchment">{current?.name}</span>…
-        </p>
-      )}
-    </section>
   );
 }
 

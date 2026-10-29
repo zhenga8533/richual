@@ -4,6 +4,7 @@ import {
   DECKS,
   type GameEvent,
   type PlayerId,
+  WALKER,
 } from "@richual/engine";
 import { SOULS } from "./theme";
 
@@ -18,6 +19,7 @@ export function describeEvent(
   const space = (i: number) => board.spaces[i]?.name ?? `space ${i}`;
   const account = (a: Account) =>
     a === "bank" ? "the bank" : a === "urn" ? "the Soul Urn" : name(a);
+  const souls = (n: number) => `${n} ${SOULS}`;
 
   switch (event.type) {
     case "turnStarted":
@@ -27,7 +29,7 @@ export function describeEvent(
     case "moved":
       return `${name(event.playerId)} moved to ${space(event.to)}`;
     case "bought":
-      return `${name(event.playerId)} bought ${space(event.space)} for ${event.price} ${SOULS}`;
+      return `${name(event.playerId)} bought ${space(event.space)} for ${souls(event.price)}`;
     case "declined":
       return `${name(event.playerId)} passed on ${space(event.space)}`;
     case "cardDrawn": {
@@ -46,32 +48,68 @@ export function describeEvent(
     }
     case "receivedGetOutCard":
       return null;
+    case "built":
+      return event.buildings === WALKER
+        ? `${name(event.playerId)} raised a Walker on ${space(event.space)}`
+        : `${name(event.playerId)} built a Guardian on ${space(event.space)} (${event.buildings})`;
+    case "soldBuilding":
+      return `${name(event.playerId)} sold a building on ${space(event.space)}`;
+    case "sealed":
+      return `${name(event.playerId)} sealed ${space(event.space)}`;
+    case "unsealed":
+      return `${name(event.playerId)} unsealed ${space(event.space)}`;
+    case "auctionStarted":
+      return `${space(event.space)} goes to auction`;
+    case "bid":
+      return `${name(event.playerId)} bid ${souls(event.amount)}`;
+    case "passedAuction":
+      return `${name(event.playerId)} dropped out of the auction`;
+    case "auctionWon":
+      return `${name(event.playerId)} won ${space(event.space)} for ${souls(event.price)}`;
+    case "auctionUnsold":
+      return `Nobody bid on ${space(event.space)}`;
+    case "debtOwed":
+      return `${name(event.debtor)} owes ${account(event.creditor)} ${souls(event.amount)} and must raise funds`;
+    case "tradeProposed":
+      return `${name(event.trade.from)} offered ${name(event.trade.to)} a trade`;
+    case "tradeAccepted":
+      return `${name(event.to)} accepted ${name(event.from)}'s trade`;
+    case "tradeRejected":
+      return `${name(event.to)} turned down ${name(event.from)}'s trade`;
+    case "tradeCancelled":
+      return event.reason === "withdrawn"
+        ? `${name(event.from)} withdrew a trade offer`
+        : `${name(event.from)}'s offer to ${name(event.to)} lapsed`;
     case "bankrupt":
       return `${name(event.playerId)} is soul-bankrupt${event.creditor === "bank" ? "" : ` to ${name(event.creditor)}`}`;
     case "gameOver":
       return `${name(event.winnerId)} completes the ritual and wins!`;
-    case "transfer": {
-      const amount = `${event.amount} ${SOULS}`;
+    case "transfer":
       switch (event.reason) {
         case "salary":
-          return `${account(event.to)} collected ${amount} at the Astral Gate`;
-        case "purchase":
-          return null;
+          return `${account(event.to)} collected ${souls(event.amount)} at the Astral Gate`;
         case "rent":
-          return `${account(event.from)} paid ${account(event.to)} ${amount} rent`;
+          return `${account(event.from)} paid ${account(event.to)} ${souls(event.amount)} rent`;
         case "tax":
-          return `${account(event.from)} paid ${amount} in tithes`;
+          return `${account(event.from)} paid ${souls(event.amount)} in tithes`;
         case "jailFine":
-          return `${account(event.from)} paid a ${amount} fine`;
+          return `${account(event.from)} paid a ${souls(event.amount)} fine`;
         case "urn":
-          return `${account(event.to)} emptied the Soul Urn: ${amount}`;
+          return `${account(event.to)} emptied the Soul Urn: ${souls(event.amount)}`;
         case "card":
           return event.from === "bank"
-            ? `${account(event.to)} received ${amount}`
-            : `${account(event.from)} paid ${account(event.to)} ${amount}`;
+            ? `${account(event.to)} received ${souls(event.amount)}`
+            : `${account(event.from)} paid ${account(event.to)} ${souls(event.amount)}`;
         case "bankruptcy":
-          return `${account(event.from)}'s remaining ${amount} went to ${account(event.to)}`;
+          return `${account(event.from)}'s remaining ${souls(event.amount)} went to ${account(event.to)}`;
+        // Purchases, buildings, seals, auctions and trades have their own clearer events.
+        case "purchase":
+        case "building":
+        case "seal":
+        case "unseal":
+        case "auction":
+        case "trade":
+          return null;
       }
-    }
   }
 }
