@@ -1,9 +1,22 @@
 import { DurableObject } from "cloudflare:workers";
 import {
+  type Action,
+  applyAction,
+  CLASSIC_RULES,
+  createGame,
+  type GameEvent,
+  type GameState,
+  HERO_IDS,
+  STATE_SCHEMA_VERSION,
+  toPublicState,
+} from "@richual/engine";
+import {
   ClientMessage,
   CloseCode,
   type ErrorCode,
+  LobbySettings,
   type LobbySnapshot,
+  type LobbyStatus,
   MAX_MESSAGE_BYTES,
   MAX_PLAYERS,
   PING,
@@ -21,17 +34,34 @@ export const HELLO_TIMEOUT_MS = 5_000;
 
 type Attachment = { playerId: string | null; connectedAt: number };
 
-type LobbyRow = { code: string; host_id: string; last_active_at: number };
-type PlayerRow = { id: string; name: string; seat: number };
+type LobbyRow = {
+  code: string;
+  host_id: string;
+  last_active_at: number;
+  status: LobbyStatus;
+  settings_json: string;
+  version: number;
+};
+type PlayerRow = { id: string; name: string; seat: number; hero: string | null };
 
 export type JoinResult =
   | { ok: true; session: SessionResponse }
   | { ok: false; error: ErrorCode; message: string };
 
+class RequestError extends Error {
+  constructor(
+    readonly code: ErrorCode,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
 /**
  * One instance per lobby, addressed by invite code. Owns the lobby's players,
- * sessions and sockets. WebSockets use the Hibernation API so an idle lobby
- * costs nothing while its connections stay open.
+ * sessions, sockets and the authoritative game state. Every message is handled
+ * synchronously after authentication, so actions within a lobby never race.
+ * WebSockets use the Hibernation API so an idle lobby costs nothing.
  */
 export class LobbyDO extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
@@ -68,6 +98,9 @@ export class LobbyDO extends DurableObject<Env> {
     // Everything below is synchronous, so concurrent joins cannot claim the same seat.
     const lobby = this.lobby();
     if (!lobby) return { ok: false, error: "not_found", message: "Lobby not found" };
+    if (lobby.status !== "open") {
+      return { ok: false, error: "game_in_progress", message: "This game has already started" };
+    }
 
     const taken = new Set(this.players().map((p) => p.seat));
     const seat = Array.from({ length: MAX_PLAYERS }, (_, i) => i).find((i) => !taken.has(i));
@@ -76,8 +109,8 @@ export class LobbyDO extends DurableObject<Env> {
     const playerId = crypto.randomUUID();
     const now = Date.now();
     this.insertPlayer(playerId, name, seat, tokenHash, now);
-    this.touch(now);
-    this.broadcastLobby();
+    this.bumpVersion(now);
+    this.broadcast([]);
     return { ok: true, session: { code: lobby.code, playerId, token } };
   }
 
@@ -119,21 +152,51 @@ export class LobbyDO extends DurableObject<Env> {
     }
 
     const msg = parsed.data;
-    switch (msg.type) {
-      case "hello":
-        await this.handleHello(ws, msg.protocol, msg.token);
-        return;
+    if (msg.type === "hello") {
+      await this.handleHello(ws, msg.protocol, msg.token);
+      return;
+    }
+
+    const { playerId } = attachment(ws);
+    if (playerId === null) {
+      send(ws, { type: "error", error: "unauthorized", message: "Say hello first" });
+      safeClose(ws, CloseCode.Unauthorized, "unauthorized");
+      return;
+    }
+
+    const clientActionId = msg.type === "action" ? msg.clientActionId : undefined;
+    try {
+      switch (msg.type) {
+        case "setHero":
+          this.setHero(playerId, msg.hero);
+          return;
+        case "updateSettings":
+          this.updateSettings(playerId, msg.settings);
+          return;
+        case "startGame":
+          this.startGame(playerId);
+          return;
+        case "returnToLobby":
+          this.returnToLobby(playerId);
+          return;
+        case "action":
+          this.handleAction(ws, playerId, msg.clientActionId, msg.expectedVersion, msg.action);
+          return;
+      }
+    } catch (error) {
+      if (!(error instanceof RequestError)) throw error;
+      send(ws, { type: "error", error: error.code, message: error.message, clientActionId });
     }
   }
 
   override async webSocketClose(ws: WebSocket, code: number, reason: string): Promise<void> {
     safeClose(ws, code, reason);
-    this.broadcastLobby(ws);
+    this.broadcast([], ws);
   }
 
   override async webSocketError(ws: WebSocket, error: unknown): Promise<void> {
     console.error("lobby websocket error", error);
-    this.broadcastLobby(ws);
+    this.broadcast([], ws);
   }
 
   override async alarm(): Promise<void> {
@@ -150,6 +213,8 @@ export class LobbyDO extends DurableObject<Env> {
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
   }
+
+  // ---------- Message handlers ----------
 
   private async handleHello(ws: WebSocket, protocol: number, token: string): Promise<void> {
     if (protocol !== PROTOCOL_VERSION) {
@@ -180,8 +245,129 @@ export class LobbyDO extends DurableObject<Env> {
     ws.serializeAttachment({ ...attachment(ws), playerId: player.id } satisfies Attachment);
     this.touch(Date.now());
     send(ws, { type: "welcome", playerId: player.id, lobby: this.snapshot() });
-    this.broadcastLobby(undefined, ws);
+    this.broadcast([], undefined, ws);
   }
+
+  private setHero(playerId: string, hero: string): void {
+    this.requireStatus("open");
+    const holder = this.sql
+      .exec<{ id: string }>("SELECT id FROM players WHERE hero = ?", hero)
+      .toArray()[0];
+    if (holder && holder.id !== playerId) {
+      throw new RequestError("rejected", "Another player already chose that hero");
+    }
+    this.sql.exec("UPDATE players SET hero = ? WHERE id = ?", hero, playerId);
+    this.bumpVersion(Date.now());
+    this.broadcast([]);
+  }
+
+  private updateSettings(playerId: string, settings: LobbySettings): void {
+    this.requireHost(playerId);
+    this.requireStatus("open");
+    this.sql.exec("UPDATE lobby SET settings_json = ? WHERE id = 1", JSON.stringify(settings));
+    this.bumpVersion(Date.now());
+    this.broadcast([]);
+  }
+
+  private startGame(playerId: string): void {
+    this.requireHost(playerId);
+    const lobby = this.requireStatus("open");
+    const players = this.players();
+    if (players.length < 2) throw new RequestError("rejected", "At least two players are needed");
+
+    const settings = parseSettings(lobby.settings_json);
+    const seed = crypto.getRandomValues(new Uint32Array(1))[0] ?? 0;
+    const state = createGame(
+      players.map((p) => ({ id: p.id, name: p.name })),
+      { ...CLASSIC_RULES, ...settings },
+      seed,
+    );
+    const now = Date.now();
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec("DELETE FROM actions");
+      this.sql.exec(
+        "INSERT INTO game (id, state_json, updated_at) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET state_json = excluded.state_json, updated_at = excluded.updated_at",
+        JSON.stringify(state),
+        now,
+      );
+      this.sql.exec("UPDATE lobby SET status = 'playing' WHERE id = 1");
+      this.bumpVersion(now);
+    });
+    const first = state.players[state.turn.playerIndex];
+    this.broadcast(first ? [{ type: "turnStarted", playerId: first.id }] : []);
+  }
+
+  private returnToLobby(playerId: string): void {
+    this.requireHost(playerId);
+    this.requireStatus("finished");
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec("DELETE FROM game");
+      this.sql.exec("DELETE FROM actions");
+      this.sql.exec("UPDATE lobby SET status = 'open' WHERE id = 1");
+      this.bumpVersion(Date.now());
+    });
+    this.broadcast([]);
+  }
+
+  private handleAction(
+    ws: WebSocket,
+    playerId: string,
+    clientActionId: string,
+    expectedVersion: number,
+    action: Action,
+  ): void {
+    const lobby = this.requireStatus("playing");
+
+    const duplicate = this.sql
+      .exec(
+        "SELECT 1 FROM actions WHERE player_id = ? AND client_action_id = ?",
+        playerId,
+        clientActionId,
+      )
+      .toArray();
+    if (duplicate.length > 0) {
+      // A retried send of an action we already applied: confirm it, don't apply it twice.
+      send(ws, { type: "ack", clientActionId });
+      return;
+    }
+
+    if (expectedVersion !== lobby.version) {
+      send(ws, {
+        type: "error",
+        error: "stale",
+        message: "The game changed before your action arrived",
+        clientActionId,
+      });
+      send(ws, { type: "lobby", lobby: this.snapshot(), events: [] });
+      return;
+    }
+
+    const result = applyAction(this.game(), playerId, action);
+    if (!result.ok) throw new RequestError("rejected", result.error.message);
+
+    const now = Date.now();
+    const finished = result.state.phase.kind === "gameOver";
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec(
+        "UPDATE game SET state_json = ?, updated_at = ? WHERE id = 1",
+        JSON.stringify(result.state),
+        now,
+      );
+      this.sql.exec(
+        "INSERT INTO actions (player_id, client_action_id, action_json, at) VALUES (?, ?, ?, ?)",
+        playerId,
+        clientActionId,
+        JSON.stringify(action),
+        now,
+      );
+      if (finished) this.sql.exec("UPDATE lobby SET status = 'finished' WHERE id = 1");
+      this.bumpVersion(now);
+    });
+    send(ws, { type: "ack", clientActionId });
+    this.broadcast(result.events);
+  }
+
+  // ---------- Storage ----------
 
   private get sql(): SqlStorage {
     return this.ctx.storage.sql;
@@ -190,20 +376,64 @@ export class LobbyDO extends DurableObject<Env> {
   private lobby(): LobbyRow | undefined {
     if (!isInitialized(this.sql)) return undefined;
     return this.sql
-      .exec<LobbyRow>("SELECT code, host_id, last_active_at FROM lobby WHERE id = 1")
+      .exec<LobbyRow>(
+        "SELECT code, host_id, last_active_at, status, settings_json, version FROM lobby WHERE id = 1",
+      )
       .toArray()[0];
   }
 
+  private requireLobby(): LobbyRow {
+    const lobby = this.lobby();
+    if (!lobby) throw new RequestError("not_found", "Lobby not found");
+    return lobby;
+  }
+
+  private requireStatus(status: LobbyStatus): LobbyRow {
+    const lobby = this.requireLobby();
+    if (lobby.status !== status) {
+      const message = {
+        open: "The game has already started",
+        playing: "No game is in progress",
+        finished: "The game is not over yet",
+      }[status];
+      throw new RequestError("rejected", message);
+    }
+    return lobby;
+  }
+
+  private requireHost(playerId: string): void {
+    if (this.requireLobby().host_id !== playerId) {
+      throw new RequestError("forbidden", "Only the host can do that");
+    }
+  }
+
   private players(): PlayerRow[] {
-    return this.sql.exec<PlayerRow>("SELECT id, name, seat FROM players ORDER BY seat").toArray();
+    return this.sql
+      .exec<PlayerRow>("SELECT id, name, seat, hero FROM players ORDER BY seat")
+      .toArray();
+  }
+
+  private game(): GameState {
+    const row = this.sql
+      .exec<{ state_json: string }>("SELECT state_json FROM game WHERE id = 1")
+      .toArray()[0];
+    if (!row) throw new Error("lobby is playing but has no game row");
+    const state = JSON.parse(row.state_json) as GameState;
+    if (state.schemaVersion !== STATE_SCHEMA_VERSION) {
+      throw new Error(`no migration from game state v${state.schemaVersion}`);
+    }
+    return state;
   }
 
   private insertPlayer(id: string, name: string, seat: number, tokenHash: string, now: number) {
+    const taken = new Set(this.players().map((p) => p.hero));
+    const hero = HERO_IDS.find((h) => !taken.has(h)) ?? null;
     this.sql.exec(
-      "INSERT INTO players (id, name, seat, token_hash, joined_at) VALUES (?, ?, ?, ?, ?)",
+      "INSERT INTO players (id, name, seat, hero, token_hash, joined_at) VALUES (?, ?, ?, ?, ?, ?)",
       id,
       name,
       seat,
+      hero,
       tokenHash,
       now,
     );
@@ -213,31 +443,54 @@ export class LobbyDO extends DurableObject<Env> {
     this.sql.exec("UPDATE lobby SET last_active_at = ? WHERE id = 1", now);
   }
 
+  private bumpVersion(now: number): void {
+    this.sql.exec("UPDATE lobby SET version = version + 1, last_active_at = ? WHERE id = 1", now);
+  }
+
+  // ---------- Snapshots ----------
+
   /** @param closing a socket that is closing and must not count as connected */
   private snapshot(closing?: WebSocket): LobbySnapshot {
-    const lobby = this.lobby();
-    if (!lobby) throw new Error("snapshot of uninitialized lobby");
+    const lobby = this.requireLobby();
     const connected = new Set(
       this.ctx
         .getWebSockets()
         .filter((ws) => ws !== closing && ws.readyState === WebSocket.OPEN)
         .map((ws) => attachment(ws).playerId),
     );
+    const players = this.players().map((p) => ({
+      ...p,
+      hero: (HERO_IDS as readonly string[]).includes(p.hero ?? "")
+        ? (p.hero as LobbySnapshot["players"][number]["hero"])
+        : null,
+      connected: connected.has(p.id),
+    }));
     return {
       code: lobby.code,
       hostId: lobby.host_id,
-      players: this.players().map((p) => ({ ...p, connected: connected.has(p.id) })),
+      status: lobby.status,
+      version: lobby.version,
+      settings: parseSettings(lobby.settings_json),
+      players,
+      game: lobby.status === "open" ? null : toPublicState(this.game()),
     };
   }
 
-  private broadcastLobby(closing?: WebSocket, skip?: WebSocket): void {
+  private broadcast(events: GameEvent[], closing?: WebSocket, skip?: WebSocket): void {
     if (!this.lobby()) return;
-    const message: ServerMessage = { type: "lobby", lobby: this.snapshot(closing) };
+    const message: ServerMessage = { type: "lobby", lobby: this.snapshot(closing), events };
     for (const ws of this.ctx.getWebSockets()) {
       if (ws === closing || ws === skip || attachment(ws).playerId === null) continue;
       send(ws, message);
     }
   }
+}
+
+function parseSettings(json: string): LobbySettings {
+  const parsed = LobbySettings.safeParse(JSON.parse(json));
+  if (!parsed.success)
+    throw new Error(`stored lobby settings are invalid: ${parsed.error.message}`);
+  return parsed.data;
 }
 
 function attachment(ws: WebSocket): Attachment {

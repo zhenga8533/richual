@@ -41,13 +41,14 @@ pnpm dev
 Opens the app at http://localhost:5173 with the Worker and Durable Objects running locally in
 workerd. Lobby state is stored under `apps/richual/.wrangler/`.
 
-| Command           | Does                                                                         |
-| ----------------- | ---------------------------------------------------------------------------- |
-| `pnpm lint`       | Biome lint + format check (`pnpm format` to fix)                             |
-| `pnpm typecheck`  | TypeScript across all packages                                               |
-| `pnpm test`       | Unit tests, plus Worker/Durable Object integration tests in workerd          |
-| `pnpm build`      | Production build of the Worker and SPA                                       |
-| `pnpm run deploy` | Build and deploy to Cloudflare (note `run`: `pnpm deploy` is a pnpm builtin) |
+| Command           | Does                                                                                                                          |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm lint`       | Biome lint + format check (`pnpm format` to fix)                                                                              |
+| `pnpm typecheck`  | TypeScript across all packages                                                                                                |
+| `pnpm test`       | Unit tests, plus Worker/Durable Object integration tests in workerd                                                           |
+| `pnpm e2e`        | Playwright multiplayer tests; starts its own dev server (first run: `pnpm --filter richual exec playwright install chromium`) |
+| `pnpm build`      | Production build of the Worker and SPA                                                                                        |
+| `pnpm run deploy` | Build and deploy to Cloudflare (note `run`: `pnpm deploy` is a pnpm builtin)                                                  |
 
 After changing `apps/richual/wrangler.jsonc`, regenerate binding types with
 `pnpm --filter richual cf-typegen`.

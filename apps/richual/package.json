@@ -10,7 +10,8 @@
     "deploy": "vite build && wrangler deploy",
     "cf-typegen": "wrangler types",
     "test": "vitest run",
-    "typecheck": "tsc -p src/client && tsc -p src/worker && tsc -p test"
+    "typecheck": "tsc -p src/client && tsc -p src/worker && tsc -p test && tsc -p e2e",
+    "e2e": "playwright test"
   },
   "dependencies": {
     "@richual/engine": "workspace:*",
@@ -24,12 +25,14 @@
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.66.0",
     "@cloudflare/vitest-plugin": "1.4.10",
+    "@playwright/test": "1.64.1",
     "@tailwindcss/vite": "4.3.3",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.1.2",
     "tailwindcss": "4.3.3",
     "vite": "8.3.5",
+    "vitest": "5.0.5",
     "wrangler": "4.155.0"
   }
 }

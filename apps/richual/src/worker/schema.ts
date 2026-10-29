@@ -17,6 +17,23 @@ const MIGRATIONS: readonly string[] = [
      token_hash TEXT NOT NULL UNIQUE,
      joined_at INTEGER NOT NULL
    );`,
+  `ALTER TABLE lobby ADD COLUMN status TEXT NOT NULL DEFAULT 'open';
+   ALTER TABLE lobby ADD COLUMN settings_json TEXT NOT NULL DEFAULT '{}';
+   ALTER TABLE lobby ADD COLUMN version INTEGER NOT NULL DEFAULT 0;
+   ALTER TABLE players ADD COLUMN hero TEXT;
+   CREATE TABLE game (
+     id INTEGER PRIMARY KEY CHECK (id = 1),
+     state_json TEXT NOT NULL,
+     updated_at INTEGER NOT NULL
+   );
+   CREATE TABLE actions (
+     seq INTEGER PRIMARY KEY AUTOINCREMENT,
+     player_id TEXT NOT NULL,
+     client_action_id TEXT NOT NULL,
+     action_json TEXT NOT NULL,
+     at INTEGER NOT NULL,
+     UNIQUE (player_id, client_action_id)
+   );`,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

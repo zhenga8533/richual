@@ -72,18 +72,21 @@ export function createGame(
   };
 }
 
-export function currentPlayer(state: GameState): PlayerState {
+/** The parts of the state that turn and legality logic need; satisfied by the public view too. */
+export type TurnView = Pick<GameState, "phase" | "players" | "turn" | "config">;
+
+export function currentPlayer(state: TurnView): PlayerState {
   const player = state.players[state.turn.playerIndex];
   if (!player) throw new Error("turn points at a missing player");
   return player;
 }
 
-export function activePlayers(state: GameState): PlayerState[] {
+export function activePlayers(state: Pick<GameState, "players">): PlayerState[] {
   return state.players.filter((p) => !p.bankrupt);
 }
 
 /** Every action `playerId` may take right now. The UI enables exactly these. */
-export function getLegalActions(state: GameState, playerId: PlayerId): Action[] {
+export function getLegalActions(state: TurnView, playerId: PlayerId): Action[] {
   if (state.phase.kind === "gameOver") return [];
   const player = currentPlayer(state);
   if (player.id !== playerId || player.bankrupt) return [];

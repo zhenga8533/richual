@@ -1,72 +1,9 @@
 import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
-import {
-  CloseCode,
-  PROTOCOL_VERSION,
-  type ServerMessage,
-  type SessionResponse,
-} from "@richual/protocol";
+import { CloseCode } from "@richual/protocol";
 import { describe, expect, it } from "vitest";
 import { IDLE_TTL_MS } from "../src/worker/lobby";
-
-const BASE = "http://richual.test";
-
-async function post(path: string, body: unknown) {
-  return exports.default.fetch(`${BASE}${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-}
-
-async function createLobby(name = "Host"): Promise<SessionResponse> {
-  const res = await post("/api/lobbies", { name });
-  expect(res.status).toBe(201);
-  return res.json();
-}
-
-async function joinLobby(code: string, name: string): Promise<SessionResponse> {
-  const res = await post(`/api/lobbies/${code}/join`, { name });
-  expect(res.status).toBe(201);
-  return res.json();
-}
-
-type TestSocket = {
-  ws: WebSocket;
-  next: () => Promise<ServerMessage>;
-  closed: Promise<CloseEvent>;
-};
-
-async function openSocket(code: string): Promise<TestSocket> {
-  const res = await exports.default.fetch(`${BASE}/api/lobbies/${code}/ws`, {
-    headers: { Upgrade: "websocket" },
-  });
-  expect(res.status).toBe(101);
-  const ws = res.webSocket;
-  if (!ws) throw new Error("no websocket in response");
-  ws.accept();
-
-  const buffered: ServerMessage[] = [];
-  const waiters: ((m: ServerMessage) => void)[] = [];
-  ws.addEventListener("message", (e) => {
-    const msg = JSON.parse(String(e.data)) as ServerMessage;
-    const waiter = waiters.shift();
-    if (waiter) waiter(msg);
-    else buffered.push(msg);
-  });
-  const closed = new Promise<CloseEvent>((resolve) => ws.addEventListener("close", resolve));
-  const next = () => {
-    const msg = buffered.shift();
-    return msg ? Promise.resolve(msg) : new Promise<ServerMessage>((r) => waiters.push(r));
-  };
-  return { ws, next, closed };
-}
-
-async function hello(code: string, token: string) {
-  const socket = await openSocket(code);
-  socket.ws.send(JSON.stringify({ type: "hello", protocol: PROTOCOL_VERSION, token }));
-  return socket;
-}
+import { BASE, createLobby, hello, joinLobby, openSocket, post } from "./helpers";
 
 describe("HTTP API", () => {
   it("creates a lobby and returns a host session", async () => {
@@ -117,7 +54,7 @@ describe("WebSocket sessions", () => {
     expect(msg).toMatchObject({ type: "welcome", playerId: host.playerId });
     if (msg.type !== "welcome") throw new Error("unreachable");
     expect(msg.lobby.players).toEqual([
-      { id: host.playerId, name: "Haze", seat: 0, connected: true },
+      { id: host.playerId, name: "Haze", seat: 0, hero: "abrams", connected: true },
     ]);
     ws.close();
   });

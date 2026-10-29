@@ -11,6 +11,7 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@richual/engine": "workspace:*",
     "zod": "4.6.7"
   }
 }

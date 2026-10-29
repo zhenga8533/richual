@@ -2,6 +2,8 @@ export * from "./board";
 export * from "./cards";
 export * from "./config";
 export * from "./game";
+export * from "./heroes";
 export * from "./rng";
 export * from "./simulate";
 export * from "./state";
+export * from "./view";

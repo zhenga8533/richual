@@ -1,6 +1,8 @@
 import type { SessionResponse } from "@richual/protocol";
 import { type FormEvent, useEffect, useState } from "react";
 import { joinLobby } from "../api";
+import { GameView } from "../components/GameView";
+import { Setup } from "../components/Setup";
 import { connect, useConnection } from "../connection";
 import { navigate } from "../router";
 import { loadName, loadSession, saveName, saveSession } from "../session";
@@ -71,7 +73,7 @@ function JoinForm({
 }
 
 function Lobby({ session }: { session: SessionResponse }) {
-  const { status, lobby, playerId, error } = useConnection();
+  const { status, lobby, error, notice } = useConnection();
   const [copied, setCopied] = useState(false);
 
   useEffect(() => connect(session), [session]);
@@ -87,53 +89,35 @@ function Lobby({ session }: { session: SessionResponse }) {
     }
   };
 
+  const game = lobby && lobby.status !== "open" ? lobby.game : null;
+
   return (
-    <div className="flex w-full max-w-lg flex-col gap-6">
+    <div className={`flex w-full flex-col gap-4 ${game ? "max-w-7xl" : "max-w-lg"}`}>
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-xs uppercase tracking-widest text-parchment-dim">Lobby</p>
-          <h1 className="font-mono text-4xl tracking-[0.3em] text-brass">{session.code}</h1>
+          <h1 className="font-mono text-3xl tracking-[0.3em] text-brass">{session.code}</h1>
         </div>
-        <button type="button" className="btn-ghost text-sm" onClick={copyInvite}>
-          {copied ? "Copied!" : "Copy invite link"}
-        </button>
+        <div className="flex items-center gap-4">
+          <StatusLine status={status} />
+          <button type="button" className="btn-ghost text-sm" onClick={copyInvite}>
+            {copied ? "Copied!" : "Copy invite link"}
+          </button>
+        </div>
       </header>
 
-      <StatusLine status={status} />
       {error && (
         <p role="alert" className="text-sm text-blood">
           {error}
         </p>
       )}
-
-      {lobby && (
-        <section className="panel p-5" aria-labelledby="players-heading">
-          <h2 id="players-heading" className="mb-3 font-display text-xl">
-            Players ({lobby.players.length}/6)
-          </h2>
-          <ul className="flex flex-col gap-2">
-            {lobby.players.map((p) => (
-              <li key={p.id} className="flex items-center gap-3">
-                <span
-                  className={`size-2.5 rounded-full ${p.connected ? "bg-amber" : "bg-smoke-light"}`}
-                  role="img"
-                  aria-label={p.connected ? "online" : "offline"}
-                />
-                <span className={p.id === playerId ? "font-semibold" : ""}>{p.name}</span>
-                {p.id === lobby.hostId && (
-                  <span className="rounded-sm border border-brass-dim px-1.5 text-xs text-brass">
-                    Host
-                  </span>
-                )}
-                {p.id === playerId && <span className="text-xs text-parchment-dim">(you)</span>}
-              </li>
-            ))}
-          </ul>
-          <p className="mt-4 text-sm text-parchment-dim">
-            Starting a game isn't available yet — this build only covers lobbies.
-          </p>
-        </section>
+      {notice && (
+        <p role="status" className="panel px-3 py-2 text-sm text-amber">
+          {notice}
+        </p>
       )}
+
+      {lobby && (game ? <GameView lobby={lobby} game={game} /> : <Setup lobby={lobby} />)}
 
       {status === "closed" && (
         <button type="button" className="btn-ghost self-start" onClick={() => navigate("/")}>
@@ -152,7 +136,7 @@ function StatusLine({ status }: { status: ReturnType<typeof useConnection.getSta
     closed: "Disconnected",
   }[status];
   return (
-    <p className="text-sm text-parchment-dim" aria-live="polite">
+    <p className="text-xs text-parchment-dim" aria-live="polite">
       {text}
     </p>
   );

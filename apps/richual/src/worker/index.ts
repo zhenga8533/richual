@@ -21,7 +21,11 @@ const errorStatus: Record<ErrorCode, ContentfulStatusCode> = {
   bad_request: 400,
   unauthorized: 401,
   not_found: 404,
+  forbidden: 403,
   lobby_full: 409,
+  game_in_progress: 409,
+  stale: 409,
+  rejected: 422,
   protocol_mismatch: 426,
   internal: 500,
 };
