@@ -34,6 +34,8 @@ type ConnectionState = {
   pendingActionId: string | null;
   /** Server clock minus local clock, so deadlines display correctly on skewed machines. */
   clockOffset: number;
+  /** The latest one-time code for moving this seat to another device. */
+  seatCode: { code: string; expiresAt: number } | null;
 };
 
 export const useConnection = create<ConnectionState>(() => ({
@@ -45,6 +47,7 @@ export const useConnection = create<ConnectionState>(() => ({
   log: [],
   pendingActionId: null,
   clockOffset: 0,
+  seatCode: null,
 }));
 
 /** The current time on the server's clock. */
@@ -59,7 +62,17 @@ const TERMINAL_CLOSES: Record<number, string> = {
   [CloseCode.ProtocolMismatch]: "A new version of Richual is available. Please reload.",
   [CloseCode.LobbyClosed]: "This lobby has closed.",
   [CloseCode.Replaced]: "This lobby is open in another tab.",
+  [CloseCode.Removed]: "The host removed you from this lobby.",
+  [CloseCode.SeatMoved]: "Your seat moved to another device.",
 };
+
+/** Closes after which this browser's session for the lobby is gone for good. */
+const SESSION_ENDING: ReadonlySet<number> = new Set([
+  CloseCode.Unauthorized,
+  CloseCode.LobbyClosed,
+  CloseCode.Removed,
+  CloseCode.SeatMoved,
+]);
 
 let activeSocket: WebSocket | null = null;
 let logSeq = 0;
@@ -125,6 +138,9 @@ function handleMessage(msg: ServerMessage): void {
       // A stale action is resolved by the snapshot that follows; nothing for the player to do.
       if (msg.error !== "stale") pushToast(msg.message, "error");
       break;
+    case "seatCode":
+      useConnection.setState({ seatCode: { code: msg.code, expiresAt: msg.expiresAt } });
+      break;
     case "pong":
       break;
   }
@@ -149,6 +165,7 @@ export function connect(session: SessionResponse): () => void {
     historySeq: logSeq,
     log: [],
     pendingActionId: null,
+    seatCode: null,
   });
 
   const open = () => {
@@ -186,9 +203,7 @@ export function connect(session: SessionResponse): () => void {
       if (disposed) return;
       const terminal = TERMINAL_CLOSES[event.code];
       if (terminal) {
-        if (event.code === CloseCode.Unauthorized || event.code === CloseCode.LobbyClosed) {
-          clearSession(session.code);
-        }
+        if (SESSION_ENDING.has(event.code)) clearSession(session.code);
         useConnection.setState({ status: "closed", error: terminal, pendingActionId: null });
         return;
       }

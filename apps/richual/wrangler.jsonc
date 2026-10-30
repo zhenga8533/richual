@@ -8,8 +8,14 @@
     "run_worker_first": ["/api/*"]
   },
   "durable_objects": {
-    "bindings": [{ "name": "LOBBY", "class_name": "LobbyDO" }]
+    "bindings": [
+      { "name": "LOBBY", "class_name": "LobbyDO" },
+      { "name": "GATEKEEPER", "class_name": "GatekeeperDO" }
+    ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["LobbyDO"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["LobbyDO"] },
+    { "tag": "v2", "new_sqlite_classes": ["GatekeeperDO"] }
+  ],
   "observability": { "enabled": true }
 }

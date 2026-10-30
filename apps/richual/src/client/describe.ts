@@ -25,7 +25,9 @@ export function describeEvent(
     case "turnStarted":
       return `${name(event.playerId)}'s turn`;
     case "rolled":
-      return `${name(event.playerId)} rolled ${event.dice[0]} + ${event.dice[1]}`;
+      return `${name(event.playerId)} rolled ${event.dice[0]} + ${event.dice[1]}${
+        event.speed === undefined ? "" : event.speed === "patron" ? " + ★" : ` + ${event.speed}`
+      }`;
     case "moved":
       return `${name(event.playerId)} moved to ${space(event.to)}`;
     case "bought":

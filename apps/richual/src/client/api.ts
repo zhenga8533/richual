@@ -28,3 +28,6 @@ export const createLobby = (name: string) => post("/api/lobbies", { name });
 
 export const joinLobby = (code: string, name: string) =>
   post(`/api/lobbies/${encodeURIComponent(code)}/join`, { name });
+
+export const claimSeat = (code: string, seatCode: string) =>
+  post(`/api/lobbies/${encodeURIComponent(code)}/claim`, { seatCode });

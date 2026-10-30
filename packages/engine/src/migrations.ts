@@ -59,6 +59,13 @@ const MIGRATIONS: Record<number, Migration> = {
     }
     return next;
   },
+  // v4 added the Speed Die.
+  3: (s) => ({
+    ...s,
+    schemaVersion: 4,
+    config: { ...(s.config as object), speedDie: false },
+    turn: { ...(s.turn as object), lastSpeed: null },
+  }),
 };
 
 /** Brings a stored game state up to the current schema version. */

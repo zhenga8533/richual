@@ -459,9 +459,14 @@ function GameOver({
         </tbody>
       </table>
       {playerId === lobby.hostId ? (
-        <Button variant="primary" onClick={() => send({ type: "returnToLobby" })}>
-          Back to lobby
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="primary" onClick={() => send({ type: "rematch" })}>
+            Rematch
+          </Button>
+          <Button variant="outline" onClick={() => send({ type: "returnToLobby" })}>
+            Back to lobby
+          </Button>
+        </div>
       ) : (
         <p className="text-sm text-muted">The host can start another game.</p>
       )}

@@ -1,8 +1,11 @@
+import { lazy, Suspense } from "react";
 import { ThemeMenu } from "./components/ThemeMenu";
 import { Toaster } from "./components/Toaster";
 import { Landing } from "./pages/Landing";
-import { LobbyPage } from "./pages/LobbyPage";
 import { matchLobbyPath, navigate, usePathname } from "./router";
+
+// Only the landing page is in the first download; the lobby and game load on demand.
+const LobbyPage = lazy(() => import("./pages/LobbyPage").then((m) => ({ default: m.LobbyPage })));
 
 export function App() {
   const pathname = usePathname();
@@ -28,7 +31,13 @@ export function App() {
         <ThemeMenu />
       </header>
       <main className="flex flex-1 flex-col items-center px-4 pt-2 pb-10">
-        {code ? <LobbyPage key={code} code={code} /> : <Landing />}
+        {code ? (
+          <Suspense fallback={<p className="py-16 text-muted">Loading…</p>}>
+            <LobbyPage key={code} code={code} />
+          </Suspense>
+        ) : (
+          <Landing />
+        )}
       </main>
       <footer className="px-4 pb-4 text-center text-xs text-muted">
         Unofficial fan project. Not affiliated with or endorsed by Valve.

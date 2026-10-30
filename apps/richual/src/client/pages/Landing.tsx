@@ -1,7 +1,7 @@
-import { LobbyCode } from "@richual/protocol";
+import { LobbyCode, SeatCode } from "@richual/protocol";
 import { type FormEvent, useState } from "react";
 import { createLobby } from "../api";
-import { lobbyPath, navigate } from "../router";
+import { lobbyPath, navigate, seatHash } from "../router";
 import { loadName, saveName, saveSession } from "../session";
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
@@ -11,6 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/radix";
 export function Landing() {
   const [name, setName] = useState(loadName);
   const [code, setCode] = useState("");
+  const [seatCode, setSeatCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -37,7 +38,12 @@ export function Landing() {
       setError("Invite codes are 6 letters or digits.");
       return;
     }
-    navigate(lobbyPath(parsed.data));
+    const seat = seatCode.trim().toUpperCase();
+    if (seat && !SeatCode.safeParse(seat).success) {
+      setError("Seat codes are 6 letters or digits.");
+      return;
+    }
+    navigate(`${lobbyPath(parsed.data)}${seat ? seatHash(seat) : ""}`);
   };
 
   return (
@@ -88,6 +94,24 @@ export function Landing() {
                   spellCheck={false}
                   placeholder="ABC123"
                 />
+              </Label>
+              <Label>
+                <span>
+                  Seat code <span className="font-normal text-muted">(optional)</span>
+                </span>
+                <Input
+                  className="font-mono text-base tracking-[0.3em] uppercase"
+                  value={seatCode}
+                  onChange={(e) => setSeatCode(e.target.value)}
+                  maxLength={6}
+                  autoComplete="off"
+                  spellCheck={false}
+                  aria-describedby="seat-code-hint"
+                />
+                <span id="seat-code-hint" className="text-xs font-normal text-muted">
+                  Continuing from another device? Enter the code it shows under “Continue on another
+                  device”.
+                </span>
               </Label>
               <Button type="submit" variant="primary" size="lg" disabled={!code.trim()}>
                 Join lobby

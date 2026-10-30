@@ -3,7 +3,7 @@ import { HERO_IDS, MODES } from "@richual/engine";
 import { z } from "zod";
 
 /** Bumped on any breaking change to the wire format; clients on another version must reload. */
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 
 export const MAX_MESSAGE_BYTES = 16 * 1024;
 export const MAX_PLAYERS = 6;
@@ -31,6 +31,24 @@ export type CreateLobbyRequest = z.infer<typeof CreateLobbyRequest>;
 
 export const JoinLobbyRequest = z.object({ name: PlayerName });
 export type JoinLobbyRequest = z.infer<typeof JoinLobbyRequest>;
+
+/** A one-time code, shown on one device, that moves that player's seat to another. */
+export const SeatCode = LobbyCode;
+export const ClaimSeatRequest = z.object({ seatCode: SeatCode });
+export type ClaimSeatRequest = z.infer<typeof ClaimSeatRequest>;
+
+/** Reports at most this many bytes; anything larger is refused unread. */
+export const CLIENT_ERROR_MAX_BYTES = 4096;
+export const ClientErrorReport = z.object({
+  kind: z.enum(["render", "error", "rejection"]),
+  message: z.string().max(500),
+  stack: z.string().max(3000).optional(),
+  /** The page path only; lobby codes are fine to log, seat codes never reach it. */
+  path: z.string().max(200),
+  version: z.string().max(40),
+});
+export type ClientErrorReport = z.infer<typeof ClientErrorReport>;
+export const SEAT_CODE_TTL_MS = 10 * 60 * 1000;
 
 export const SessionResponse = z.object({
   code: z.string(),
@@ -77,6 +95,8 @@ export const LobbySettings = z.object({
   auctions: z.boolean().default(true),
   /** Even building plus the bank's limited Guardian and Walker supply. */
   evenBuilding: z.boolean().default(true),
+  /** A third die from round 2 on; the Quick preset turns it on. */
+  speedDie: z.boolean().default(false),
   mode: z.enum(["classic", "quick"]).default("classic"),
   /** When the game is scored if nobody has won outright. */
   limit: z
@@ -106,6 +126,7 @@ export function rulesFromSettings(settings: LobbySettings): RuleConfig {
     auctions: settings.auctions,
     evenBuilding: settings.evenBuilding,
     limitedBuildings: settings.evenBuilding,
+    speedDie: settings.speedDie,
     roundLimit: settings.limit.kind === "rounds" ? settings.limit.rounds : null,
   };
 }
@@ -119,6 +140,8 @@ export const LobbyPlayer = z.object({
   seat: z.number().int(),
   hero: HeroId.nullable(),
   connected: z.boolean(),
+  /** Played by the server; never connects. */
+  bot: z.boolean(),
 });
 export type LobbyPlayer = z.infer<typeof LobbyPlayer>;
 
@@ -217,6 +240,12 @@ export const ClientMessage = z.discriminatedUnion("type", [
   z.object({ type: z.literal("resume") }),
   z.object({ type: z.literal("endGame") }),
   z.object({ type: z.literal("chat"), text: z.string().trim().min(1).max(MAX_CHAT_LENGTH) }),
+  z.object({ type: z.literal("addBot") }),
+  z.object({ type: z.literal("removePlayer"), playerId: z.string().max(64) }),
+  z.object({ type: z.literal("replaceWithBot"), playerId: z.string().max(64) }),
+  z.object({ type: z.literal("setHost"), playerId: z.string().max(64) }),
+  z.object({ type: z.literal("rematch") }),
+  z.object({ type: z.literal("createSeatCode") }),
   z.object({
     type: z.literal("action"),
     /** Client-generated id; resending the same id never applies the action twice. */
@@ -242,6 +271,8 @@ export const ServerMessage = z.discriminatedUnion("type", [
     events: z.array(z.custom<GameEvent>((v) => typeof v === "object")),
   }),
   z.object({ type: z.literal("ack"), clientActionId: z.string() }),
+  /** Sent only to the player who asked for it. */
+  z.object({ type: z.literal("seatCode"), code: z.string(), expiresAt: z.number() }),
   z.object({
     type: z.literal("error"),
     error: ErrorCode,
@@ -259,4 +290,8 @@ export const CloseCode = {
   HelloTimeout: 4003,
   LobbyClosed: 4004,
   Replaced: 4005,
+  /** The host removed this player or handed their seat to a bot. */
+  Removed: 4006,
+  /** The player claimed their seat on another device. */
+  SeatMoved: 4007,
 } as const;

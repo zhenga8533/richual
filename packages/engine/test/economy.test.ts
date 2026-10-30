@@ -434,11 +434,13 @@ describe("state migration", () => {
       "guardiansPerWalker",
       "startingProperties",
       "bankruptciesToEnd",
+      "speedDie",
       "roundLimit",
     ]) {
       delete v1.config[key];
     }
     delete v1.turn.round;
+    delete v1.turn.lastSpeed;
     v1.schemaVersion = 1;
     expect(migrateState(v1)).toEqual(current);
   });

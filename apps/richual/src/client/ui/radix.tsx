@@ -1,5 +1,11 @@
-import { DropdownMenu, Popover, Switch as SwitchPrimitive, Tabs as TabsPrimitive } from "radix-ui";
-import type { ComponentProps } from "react";
+import {
+  Dialog,
+  DropdownMenu,
+  Popover,
+  Switch as SwitchPrimitive,
+  Tabs as TabsPrimitive,
+} from "radix-ui";
+import type { ComponentProps, ReactNode } from "react";
 import { cn } from "./cn";
 
 // ---------- Tabs ----------
@@ -61,6 +67,46 @@ export function PopoverContent({
 
 export const PopoverClose = Popover.Close;
 
+// ---------- Bottom sheet ----------
+
+/**
+ * A dialog that slides up from the bottom on phones. Non-modal for the same
+ * CSP reason as the menu below, so it draws its own backdrop.
+ */
+export function Sheet({
+  open,
+  onOpenChange,
+  title,
+  children,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange} modal={false}>
+      <Dialog.Portal>
+        {open && (
+          <div
+            className="fixed inset-0 z-40 bg-black/40"
+            aria-hidden
+            onClick={() => onOpenChange(false)}
+          />
+        )}
+        <Dialog.Content
+          className="sheet-up fixed inset-x-0 bottom-0 z-50 max-h-[85dvh] overflow-y-auto rounded-t-2xl border-t border-line bg-surface p-4 pb-[max(1rem,env(safe-area-inset-bottom))] text-fg shadow-pop outline-none"
+          aria-describedby={undefined}
+        >
+          <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-line-strong" aria-hidden />
+          <Dialog.Title className="sr-only">{title}</Dialog.Title>
+          {children}
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
 // ---------- Switch ----------
 
 export function Switch({ className, ...props }: ComponentProps<typeof SwitchPrimitive.Root>) {
@@ -102,6 +148,18 @@ export function MenuContent({ className, ...props }: ComponentProps<typeof Dropd
         {...props}
       />
     </DropdownMenu.Portal>
+  );
+}
+
+export function MenuItem({ className, ...props }: ComponentProps<typeof DropdownMenu.Item>) {
+  return (
+    <DropdownMenu.Item
+      className={cn(
+        "flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none select-none data-[highlighted]:bg-surface-2 [&_svg]:size-4 [&_svg]:text-muted",
+        className,
+      )}
+      {...props}
+    />
   );
 }
 

@@ -1,4 +1,7 @@
 import {
+  CLIENT_ERROR_MAX_BYTES,
+  ClaimSeatRequest,
+  ClientErrorReport,
   CreateLobbyRequest,
   type ErrorCode,
   type ErrorResponse,
@@ -7,8 +10,10 @@ import {
 } from "@richual/protocol";
 import { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
-import { generateLobbyCode } from "./crypto";
+import { generateLobbyCode, sha256Hex } from "./crypto";
+import { LIMITS } from "./gatekeeper";
 
+export { GatekeeperDO } from "./gatekeeper";
 export { LobbyDO } from "./lobby";
 
 const CREATE_ATTEMPTS = 5;
@@ -32,6 +37,40 @@ const errorStatus: Record<ErrorCode, ContentfulStatusCode> = {
   internal: 500,
 };
 
+type LimitName = keyof typeof LIMITS;
+
+/**
+ * Charges `names` against the caller's limits. Returns a 429 response when one is
+ * exhausted, or null to go ahead. Requests without CF-Connecting-IP (local dev and
+ * tests) are not limited; Cloudflare always sets it in production.
+ */
+const LOOPBACK = new Set(["127.0.0.1", "::1"]);
+
+async function rateLimit(env: Env, request: Request, names: LimitName[]): Promise<Response | null> {
+  const ip = request.headers.get("CF-Connecting-IP");
+  // Cloudflare's edge always sends a public address; loopback only comes from local dev and tests.
+  if (!ip || LOOPBACK.has(ip)) return null;
+  const client = env.GATEKEEPER.getByName(`ip:${await sha256Hex(ip)}`);
+  for (const name of names) {
+    const { limit, windowMs } = LIMITS[name];
+    // The daily lobby cap is shared by everyone; the rest are per client.
+    const counter = name === "lobbiesPerDay" ? env.GATEKEEPER.getByName("global") : client;
+    const result = await counter.take(name, limit, windowMs);
+    if (!result.ok) {
+      const minutes = Math.max(1, Math.ceil(result.retryAfterMs / 60_000));
+      const message =
+        name === "lobbiesPerDay"
+          ? "Richual has hit its daily limit on new games. Please try again later."
+          : `Too many requests. Try again in ${minutes} minute${minutes === 1 ? "" : "s"}.`;
+      return Response.json(errorBody("rate_limited", message), {
+        status: 429,
+        headers: { "Retry-After": String(Math.ceil(result.retryAfterMs / 1000)) },
+      });
+    }
+  }
+  return null;
+}
+
 async function readJson(request: Request): Promise<unknown> {
   try {
     return await request.json();
@@ -44,6 +83,8 @@ app.post("/api/lobbies", async (c) => {
   const body = CreateLobbyRequest.safeParse(await readJson(c.req.raw));
   if (!body.success)
     return c.json(errorBody("bad_request", body.error.issues[0]?.message ?? ""), 400);
+  const limited = await rateLimit(c.env, c.req.raw, ["createLobby", "lobbiesPerDay"]);
+  if (limited) return limited;
 
   for (let attempt = 0; attempt < CREATE_ATTEMPTS; attempt++) {
     const code = generateLobbyCode();
@@ -60,10 +101,44 @@ app.post("/api/lobbies/:code/join", async (c) => {
   const body = JoinLobbyRequest.safeParse(await readJson(c.req.raw));
   if (!body.success)
     return c.json(errorBody("bad_request", body.error.issues[0]?.message ?? ""), 400);
+  const limited = await rateLimit(c.env, c.req.raw, ["joinLobby"]);
+  if (limited) return limited;
 
   const result = await c.env.LOBBY.getByName(code.data).join(body.data.name);
   if (!result.ok) return c.json(errorBody(result.error, result.message), errorStatus[result.error]);
   return c.json(result.session, 201);
+});
+
+app.post("/api/lobbies/:code/claim", async (c) => {
+  const code = LobbyCode.safeParse(c.req.param("code"));
+  if (!code.success) return c.json(errorBody("not_found", "Lobby not found"), 404);
+  const body = ClaimSeatRequest.safeParse(await readJson(c.req.raw));
+  if (!body.success) return c.json(errorBody("bad_request", "That isn't a seat code"), 400);
+  const limited = await rateLimit(c.env, c.req.raw, ["claimSeat"]);
+  if (limited) return limited;
+
+  const result = await c.env.LOBBY.getByName(code.data).claimSeat(body.data.seatCode);
+  if (!result.ok) return c.json(errorBody(result.error, result.message), errorStatus[result.error]);
+  return c.json(result.session, 201);
+});
+
+app.post("/api/client-errors", async (c) => {
+  const text = await c.req.text();
+  if (new TextEncoder().encode(text).byteLength > CLIENT_ERROR_MAX_BYTES) {
+    return c.json(errorBody("bad_request", "Report too large"), 413);
+  }
+  let json: unknown = null;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    // Falls through to the schema check below.
+  }
+  const report = ClientErrorReport.safeParse(json);
+  if (!report.success) return c.json(errorBody("bad_request", "Malformed report"), 400);
+  const limited = await rateLimit(c.env, c.req.raw, ["clientError"]);
+  if (limited) return limited;
+  console.error(JSON.stringify({ event: "clientError", ...report.data }));
+  return c.body(null, 204);
 });
 
 app.get("/api/lobbies/:code/ws", async (c) => {

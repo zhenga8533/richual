@@ -22,6 +22,14 @@ arrive. If you know the classic property-trading game, you already know most of 
 
 Passing the **Astral Gate** pays 200 ◈ (double for landing exactly on it, if that rule is on).
 
+### The Speed Die (optional, on in Quick)
+
+From round 2, a third die is rolled with the two normal dice. Its faces are 1, 2, 3, 1, 2 and ★.
+A number adds to your move. On ★ you move by the normal dice, then carry straight on to the next
+unowned property (or, once everything is owned, the next space where you'd pay rent), and only that
+space takes effect. Landing on Banished still banishes you. Doubles count only the normal dice, and
+the Speed Die isn't rolled to leave the Lost Whisper.
+
 ## Rent
 
 | Space          | Rent                                                                  |
@@ -87,3 +95,10 @@ a 20-round limit.
   and sell or seal just enough to pay a debt. It never trades.
 - If the host is away for two minutes, hosting passes to the player who has been connected longest.
 - Reconnect any time from the same browser: your seat is kept.
+- To switch devices, choose **Continue on another device** and scan the QR code, or enter the
+  seat code on the Join tab. The code works once, within 10 minutes, and signs out the old device.
+- The **host** can add **bots** before the game, remove players before it starts, and make someone
+  else host. If someone has to leave mid-game, the host can hand their seat to a bot, which keeps
+  everything they own and plays on. Bots take a moment between moves so you can follow along, and
+  stop when the game is paused.
+- After a game, **Rematch** starts a new one with the same players and rules.

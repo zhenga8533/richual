@@ -1,11 +1,4 @@
-import {
-  type BoardDefinition,
-  getBoard,
-  groupIndices,
-  indicesOfKind,
-  isOwnable,
-  jailIndex,
-} from "./board";
+import { type BoardDefinition, getBoard, indicesOfKind, isOwnable, jailIndex } from "./board";
 import { DECKS, type DeckId } from "./cards";
 import { MAX_PLAYERS, MIN_PLAYERS, type RuleConfig } from "./config";
 import { checkAction, getLegalActions } from "./legal";
@@ -19,6 +12,7 @@ import {
   mortgageValue,
   nextBuildingLevel,
   sealedTransferFee,
+  standingRent,
   tradeProblem,
   unsealCost,
   WALKER,
@@ -34,6 +28,7 @@ import {
   type GameState,
   type PlayerId,
   type PlayerState,
+  type SpeedFace,
   STATE_SCHEMA_VERSION,
   type Trade,
   type TradeBundle,
@@ -45,7 +40,11 @@ export type NewPlayer = { id: PlayerId; name: string };
 export type ApplyOptions = {
   /** Fixed dice instead of the seeded RNG; for tests and tooling only. */
   dice?: readonly [number, number];
+  /** A fixed Speed Die face, when the Speed Die is in play; for tests only. */
+  speed?: SpeedFace;
 };
+
+const SPEED_FACES: readonly SpeedFace[] = [1, 2, 3, 1, 2, "patron"];
 
 export function createGame(
   players: readonly NewPlayer[],
@@ -102,6 +101,7 @@ export function createGame(
       doublesCount: 0,
       extraRoll: false,
       lastRoll: null,
+      lastSpeed: null,
     },
     phase: { kind: "awaitingRoll" },
     debts: [],
@@ -368,9 +368,12 @@ class Game {
     const dice = this.rollDice();
     const [a, b] = dice;
     const doubles = a === b;
+    // The Speed Die joins from the second round, and never for a roll to leave jail.
+    const speed = config.speedDie && turn.round >= 2 && !p.inJail ? this.rollSpeed() : null;
     turn.lastRoll = dice;
+    turn.lastSpeed = speed;
     turn.extraRoll = false;
-    this.emit({ type: "rolled", playerId: p.id, dice });
+    this.emit({ type: "rolled", playerId: p.id, dice, ...(speed !== null && { speed }) });
 
     if (p.inJail) {
       if (doubles) {
@@ -396,7 +399,42 @@ class Game {
       }
       turn.extraRoll = true;
     }
-    this.moveForward(p, a + b);
+    if (speed === "patron") this.patronMove(p, a + b);
+    else this.moveForward(p, a + b + (speed ?? 0));
+  }
+
+  /**
+   * The Speed Die's Patron (★): after moving, carry on to the next unowned
+   * property, or if none is left the next one where rent is owed, and resolve
+   * only that space. Landing on Banished still banishes.
+   */
+  private patronMove(p: PlayerState, steps: number): void {
+    const size = this.board.spaces.length;
+    const landing = (p.position + steps) % size;
+    if (this.board.spaces[landing]?.kind === "goToJail") {
+      this.moveForward(p, steps);
+      return;
+    }
+    const ahead = Array.from({ length: size }, (_, k) => (landing + k) % size);
+    const ownable = ahead.filter((i) => {
+      const space = this.board.spaces[i];
+      return space !== undefined && isOwnable(space);
+    });
+    const target =
+      ownable.find((i) => this.state.owners[i] === null) ??
+      ownable.find((i) => {
+        const owner = this.state.owners[i];
+        return owner !== null && owner !== p.id && !this.state.sealed[i];
+      }) ??
+      landing;
+    this.moveForward(p, steps + this.forwardDistance(landing, target));
+  }
+
+  private rollSpeed(): SpeedFace {
+    if (this.options.speed !== undefined) return this.options.speed;
+    let index: number;
+    [index, this.state.rng] = nextInt(this.state.rng, 0, SPEED_FACES.length - 1);
+    return SPEED_FACES[index] as SpeedFace;
   }
 
   /**
@@ -449,6 +487,7 @@ class Game {
       doublesCount: 0,
       extraRoll: false,
       lastRoll: turn.lastRoll,
+      lastSpeed: turn.lastSpeed,
     };
     this.state.phase = { kind: "awaitingRoll" };
     this.emit({ type: "turnStarted", playerId: this.current.id });
@@ -554,39 +593,20 @@ class Game {
   }
 
   private rent(index: number, landing: LandingOptions): number {
-    const space = this.board.spaces[index];
-    const owner = this.state.owners[index];
-    if (!space || !owner) throw new Error(`no rent owed on ${index}`);
-    const ownedOfKind = (kind: "zipline" | "utility") =>
-      indicesOfKind(this.board, kind).filter((i) => this.state.owners[i] === owner).length;
-
-    switch (space.kind) {
-      case "property": {
-        const buildings = this.state.buildings[index] ?? 0;
-        const base = space.rent[buildings] ?? 0;
-        const fullSet = groupIndices(this.board, space.group).every(
-          (i) => this.state.owners[i] === owner,
-        );
-        return buildings === 0 && fullSet ? base * 2 : base;
-      }
-      case "zipline":
-        return (
-          (this.board.ziplineRent[ownedOfKind("zipline") - 1] ?? 0) *
-          (landing.ziplineMultiplier ?? 1)
-        );
-      case "utility": {
-        if (landing.utilityMultiplier !== undefined) {
-          const dice = this.rollDice();
-          this.emit({ type: "rolled", playerId: this.current.id, dice });
-          return (dice[0] + dice[1]) * landing.utilityMultiplier;
-        }
-        const roll = this.state.turn.lastRoll;
-        const total = roll ? roll[0] + roll[1] : 0;
-        return total * (this.board.utilityMultiplier[ownedOfKind("utility") - 1] ?? 0);
-      }
-      default:
-        throw new Error(`space ${index} does not charge rent`);
+    const standing = standingRent(this.state, this.board, index);
+    if (!standing) throw new Error(`no rent owed on ${index}`);
+    if ("souls" in standing) {
+      const zipline = this.board.spaces[index]?.kind === "zipline";
+      return standing.souls * (zipline ? (landing.ziplineMultiplier ?? 1) : 1);
     }
+    if (landing.utilityMultiplier !== undefined) {
+      const dice = this.rollDice();
+      this.emit({ type: "rolled", playerId: this.current.id, dice });
+      return (dice[0] + dice[1]) * landing.utilityMultiplier;
+    }
+    const roll = this.state.turn.lastRoll;
+    const total = roll ? roll[0] + roll[1] : 0;
+    return total * standing.diceTimes;
   }
 
   private requireBuyPhase(): number {

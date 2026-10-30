@@ -1,22 +1,61 @@
 import type { SessionResponse } from "@richual/protocol";
 import { Check, Link2 } from "lucide-react";
-import { type FormEvent, useEffect, useState } from "react";
-import { joinLobby } from "../api";
-import { GameView } from "../components/GameView";
-import { Setup } from "../components/Setup";
+import { type FormEvent, lazy, Suspense, useEffect, useRef, useState } from "react";
+import { claimSeat, joinLobby } from "../api";
+import { SeatTransfer } from "../components/SeatTransfer";
 import { type ConnectionStatus, connect, useConnection } from "../connection";
-import { navigate } from "../router";
+import { navigate, seatCodeFromHash } from "../router";
 import { loadName, loadSession, saveName, saveSession } from "../session";
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
 import { cn } from "../ui/cn";
 import { Input, Label } from "../ui/field";
 
+// The game screens are most of the bundle; the landing page shouldn't wait for them.
+const GameView = lazy(() =>
+  import("../components/GameView").then((m) => ({ default: m.GameView })),
+);
+const Setup = lazy(() => import("../components/Setup").then((m) => ({ default: m.Setup })));
+
 export function LobbyPage({ code }: { code: string }) {
   const [session, setSession] = useState(() => loadSession(code));
+  const [seatCode, setSeatCode] = useState(seatCodeFromHash);
+  const [claimError, setClaimError] = useState<string | null>(null);
 
-  if (!session) return <JoinForm code={code} onJoined={setSession} />;
-  return <Lobby session={session} />;
+  // A code works once, so it must be claimed once even when effects run twice.
+  const claiming = useRef<string | null>(null);
+  useEffect(() => {
+    if (!seatCode || claiming.current === seatCode) return;
+    claiming.current = seatCode;
+    // Keep the code out of history and bookmarks either way.
+    history.replaceState(null, "", location.pathname);
+    claimSeat(code, seatCode)
+      .then((claimed) => {
+        saveSession(claimed);
+        setSession(claimed);
+      })
+      .catch((err: unknown) => {
+        setClaimError(err instanceof Error ? err.message : "Could not move seat");
+      })
+      .finally(() => setSeatCode(null));
+  }, [code, seatCode]);
+
+  if (seatCode) {
+    return <p className="py-16 text-muted">Moving your seat to this device…</p>;
+  }
+  if (!session) {
+    return (
+      <>
+        {claimError && (
+          <p role="alert" className="mt-8 rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">
+            {claimError}
+          </p>
+        )}
+        <JoinForm code={code} onJoined={setSession} />
+      </>
+    );
+  }
+  return <Lobby key={session.token} session={session} />;
 }
 
 function JoinForm({
@@ -112,6 +151,7 @@ function Lobby({ session }: { session: SessionResponse }) {
             {copied ? <Check /> : <Link2 />}
             {copied ? "Copied!" : "Copy invite link"}
           </Button>
+          {status === "open" && <SeatTransfer code={session.code} />}
           <StatusDot status={status} />
         </div>
       )}
@@ -122,7 +162,11 @@ function Lobby({ session }: { session: SessionResponse }) {
         </p>
       )}
 
-      {lobby && (game ? <GameView lobby={lobby} game={game} /> : <Setup lobby={lobby} />)}
+      {lobby && (
+        <Suspense fallback={<p className="py-16 text-center text-muted">Loading…</p>}>
+          {game ? <GameView lobby={lobby} game={game} /> : <Setup lobby={lobby} />}
+        </Suspense>
+      )}
 
       {status === "closed" && (
         <Button variant="outline" className="self-start" onClick={() => navigate("/")}>
