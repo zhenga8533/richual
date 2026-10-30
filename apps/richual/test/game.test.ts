@@ -41,10 +41,14 @@ async function startedGame() {
   };
 }
 
+/** How many applied actions the lobby remembers for duplicate detection. */
 const actionCount = (code: string) =>
-  runInDurableObject(env.LOBBY.getByName(code), (_, state) =>
-    state.storage.sql.exec("SELECT COUNT(*) AS n FROM actions").one(),
-  ).then((row) => row.n);
+  runInDurableObject(env.LOBBY.getByName(code), (_, state) => {
+    const row = state.storage.sql
+      .exec<{ action_ids_json: string }>("SELECT action_ids_json FROM game")
+      .toArray()[0];
+    return row ? (JSON.parse(row.action_ids_json) as string[]).length : 0;
+  });
 
 describe("lobby setup", () => {
   it("assigns distinct default heroes", async () => {

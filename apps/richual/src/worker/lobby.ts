@@ -31,7 +31,7 @@ import {
   type SessionResponse,
 } from "@richual/protocol";
 import { generateToken, sha256Hex } from "./crypto";
-import { isInitialized, migrate } from "./schema";
+import { createSchema, isInitialized, migrate } from "./schema";
 
 /** Lobbies with no activity for this long are deleted. */
 export const IDLE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -41,6 +41,8 @@ export const HOST_GRACE_MS = 2 * 60 * 1000;
 const CHAT_HISTORY = 30;
 /** Event batches (one per state change) kept for reconnecting clients' logs. */
 const EVENT_HISTORY = 40;
+/** Recently applied action ids, enough to recognise a client resending after a reconnect. */
+const ACTION_ID_HISTORY = 50;
 /** Token bucket per socket: bursts of this many messages, refilled at RATE_REFILL_PER_SEC. */
 const RATE_BURST = 20;
 const RATE_REFILL_PER_SEC = 5;
@@ -108,7 +110,7 @@ export class LobbyDO extends DurableObject<Env> {
 
     const now = Date.now();
     const playerId = crypto.randomUUID();
-    migrate(this.ctx.storage);
+    createSchema(this.ctx.storage);
     this.sql.exec(
       "INSERT INTO lobby (id, code, host_id, created_at, last_active_at) VALUES (1, ?, ?, ?, ?)",
       code,
@@ -117,7 +119,8 @@ export class LobbyDO extends DurableObject<Env> {
       now,
     );
     this.insertPlayer(playerId, hostName, 0, tokenHash, now);
-    await this.scheduleAlarm();
+    // A new lobby's only deadline is idle cleanup.
+    await this.ctx.storage.setAlarm(now + IDLE_TTL_MS);
     return { code, playerId, token };
   }
 
@@ -274,7 +277,7 @@ export class LobbyDO extends DurableObject<Env> {
 
     lobby = this.requireLobby();
     if (lobby.host_check_at !== null && now >= lobby.host_check_at) this.handOverHost(now);
-    await this.scheduleAlarm();
+    await this.scheduleAlarm(true);
   }
 
   // ---------- Message handlers ----------
@@ -373,13 +376,15 @@ export class LobbyDO extends DurableObject<Env> {
     const first = state.players[state.turn.playerIndex];
     const events: GameEvent[] = first ? [{ type: "turnStarted", playerId: first.id }] : [];
     this.ctx.storage.transactionSync(() => {
-      this.sql.exec("DELETE FROM actions");
-      this.sql.exec("DELETE FROM event_log");
-      this.recordEvents(events);
       this.sql.exec(
-        "INSERT INTO game (id, state_json, updated_at) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET state_json = excluded.state_json, updated_at = excluded.updated_at",
+        `INSERT INTO game (id, state_json, updated_at, events_json, action_ids_json)
+           VALUES (1, ?, ?, ?, '[]')
+         ON CONFLICT(id) DO UPDATE SET state_json = excluded.state_json,
+           updated_at = excluded.updated_at, events_json = excluded.events_json,
+           action_ids_json = '[]'`,
         JSON.stringify(state),
         now,
+        JSON.stringify(events.length > 0 ? [events] : []),
       );
       this.sql.exec(
         "UPDATE lobby SET status = 'playing', paused = 0, play_ms = 0, resumed_at = ?, action_deadline = ? WHERE id = 1",
@@ -396,8 +401,6 @@ export class LobbyDO extends DurableObject<Env> {
     this.requireStatus("finished");
     this.ctx.storage.transactionSync(() => {
       this.sql.exec("DELETE FROM game");
-      this.sql.exec("DELETE FROM actions");
-      this.sql.exec("DELETE FROM event_log");
       this.sql.exec(
         "UPDATE lobby SET status = 'open', paused = 0, play_ms = 0, resumed_at = NULL, action_deadline = NULL WHERE id = 1",
       );
@@ -453,14 +456,7 @@ export class LobbyDO extends DurableObject<Env> {
   ): void {
     const lobby = this.requireStatus("playing");
 
-    const duplicate = this.sql
-      .exec(
-        "SELECT 1 FROM actions WHERE player_id = ? AND client_action_id = ?",
-        playerId,
-        clientActionId,
-      )
-      .toArray();
-    if (duplicate.length > 0) {
+    if (this.recentActionIds().includes(actionKey(playerId, clientActionId))) {
       // A retried send of an action we already applied: confirm it, don't apply it twice.
       send(ws, { type: "ack", clientActionId });
       return;
@@ -483,7 +479,7 @@ export class LobbyDO extends DurableObject<Env> {
 
     const result = applyAction(this.game(), playerId, action);
     if (!result.ok) throw new RequestError("rejected", result.error.message);
-    this.commitGame(result, Date.now(), { playerId, clientActionId, action });
+    this.commitGame(result, Date.now(), { playerId, clientActionId });
     send(ws, { type: "ack", clientActionId });
   }
 
@@ -494,7 +490,7 @@ export class LobbyDO extends DurableObject<Env> {
   private commitGame(
     result: ApplyResult,
     now: number,
-    logged?: { playerId: string; clientActionId: string; action: Action },
+    logged?: { playerId: string; clientActionId: string },
   ): void {
     if (!result.ok) throw new RequestError("rejected", result.error.message);
     const { state, events } = result;
@@ -505,31 +501,36 @@ export class LobbyDO extends DurableObject<Env> {
       ? null
       : actionDeadline(state, parseSettings(lobby.settings_json), now);
 
+    const row = this.gameRow();
+    const eventBatches = JSON.parse(row.events_json) as GameEvent[][];
+    if (events.length > 0) eventBatches.push(events);
+    const actionIds = JSON.parse(row.action_ids_json) as string[];
+    if (logged) actionIds.push(actionKey(logged.playerId, logged.clientActionId));
+
+    // Exactly two row writes: the game and the lobby.
     this.ctx.storage.transactionSync(() => {
       this.sql.exec(
-        "UPDATE game SET state_json = ?, updated_at = ? WHERE id = 1",
+        "UPDATE game SET state_json = ?, updated_at = ?, events_json = ?, action_ids_json = ? WHERE id = 1",
         JSON.stringify(state),
         now,
+        JSON.stringify(eventBatches.slice(-EVENT_HISTORY)),
+        JSON.stringify(actionIds.slice(-ACTION_ID_HISTORY)),
       );
-      this.recordEvents(events);
-      if (logged) {
+      if (finished) {
         this.sql.exec(
-          "INSERT INTO actions (player_id, client_action_id, action_json, at) VALUES (?, ?, ?, ?)",
-          logged.playerId,
-          logged.clientActionId,
-          JSON.stringify(logged.action),
+          `UPDATE lobby SET status = 'finished', paused = 0, play_ms = play_ms + ?,
+             resumed_at = NULL, action_deadline = NULL, version = version + 1, last_active_at = ?
+           WHERE id = 1`,
+          lobby.resumed_at === null ? 0 : now - lobby.resumed_at,
+          now,
+        );
+      } else {
+        this.sql.exec(
+          "UPDATE lobby SET action_deadline = ?, version = version + 1, last_active_at = ? WHERE id = 1",
+          deadline,
           now,
         );
       }
-      if (finished) {
-        this.sql.exec(
-          "UPDATE lobby SET status = 'finished', paused = 0, play_ms = play_ms + ?, resumed_at = NULL, action_deadline = NULL WHERE id = 1",
-          lobby.resumed_at === null ? 0 : now - lobby.resumed_at,
-        );
-      } else {
-        this.sql.exec("UPDATE lobby SET action_deadline = ? WHERE id = 1", deadline);
-      }
-      this.bumpVersion(now);
     });
     this.broadcast(events);
   }
@@ -562,7 +563,8 @@ export class LobbyDO extends DurableObject<Env> {
     return lobby.resumed_at + limit.minutes * 60_000 - lobby.play_ms;
   }
 
-  private async scheduleAlarm(): Promise<void> {
+  /** @param afterFiring set when called from alarm(), which must always set the next one */
+  private async scheduleAlarm(afterFiring = false): Promise<void> {
     const lobby = this.lobby();
     if (!lobby) return;
     const candidates = [
@@ -572,7 +574,11 @@ export class LobbyDO extends DurableObject<Env> {
       lobby.host_check_at,
     ].filter((t): t is number => t !== null);
     const next = Math.min(...candidates);
-    if ((await this.ctx.storage.getAlarm()) !== next) await this.ctx.storage.setAlarm(next);
+    // Only ever bring the alarm forward. Pushing it back on every action (the idle
+    // deadline moves each time) would cost a write per action; an alarm that fires
+    // early just finds nothing due and reschedules itself.
+    const current = afterFiring ? null : await this.ctx.storage.getAlarm();
+    if (current === null || next < current) await this.ctx.storage.setAlarm(next);
   }
 
   private takeToken(ws: WebSocket): boolean {
@@ -662,21 +668,26 @@ export class LobbyDO extends DurableObject<Env> {
     );
   }
 
-  /** Stores one state change's events as a single row, keeping only recent history. */
-  private recordEvents(events: GameEvent[]): void {
-    if (events.length === 0) return;
-    this.sql.exec("INSERT INTO event_log (events_json) VALUES (?)", JSON.stringify(events));
-    this.sql.exec(
-      "DELETE FROM event_log WHERE seq <= (SELECT MAX(seq) FROM event_log) - ?",
-      EVENT_HISTORY,
-    );
+  private gameRow(): { events_json: string; action_ids_json: string } {
+    const row = this.sql
+      .exec<{ events_json: string; action_ids_json: string }>(
+        "SELECT events_json, action_ids_json FROM game WHERE id = 1",
+      )
+      .toArray()[0];
+    if (!row) throw new Error("lobby is playing but has no game row");
+    return row;
   }
 
+  /** Recent events, oldest first; empty when no game has started. */
   private recentEvents(): GameEvent[] {
-    return this.sql
-      .exec<{ events_json: string }>("SELECT events_json FROM event_log ORDER BY seq")
-      .toArray()
-      .flatMap((row) => JSON.parse(row.events_json) as GameEvent[]);
+    const row = this.sql
+      .exec<{ events_json: string }>("SELECT events_json FROM game WHERE id = 1")
+      .toArray()[0];
+    return row ? (JSON.parse(row.events_json) as GameEvent[][]).flat() : [];
+  }
+
+  private recentActionIds(): string[] {
+    return JSON.parse(this.gameRow().action_ids_json) as string[];
   }
 
   private touch(now: number): void {
@@ -780,4 +791,9 @@ function safeClose(ws: WebSocket, code: number, reason: string): void {
   } catch {
     // Already closing or closed.
   }
+}
+
+/** Identifies an applied action for duplicate detection; client ids are only unique per player. */
+function actionKey(playerId: string, clientActionId: string): string {
+  return `${playerId}:${clientActionId}`;
 }
