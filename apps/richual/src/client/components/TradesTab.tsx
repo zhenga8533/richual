@@ -10,9 +10,12 @@ import {
   type TradeBundle,
 } from "@richual/engine";
 import type { LobbySnapshot } from "@richual/protocol";
+import { ArrowRightLeft, Plus } from "lucide-react";
 import { useState } from "react";
 import { sendAction, useConnection } from "../connection";
-import { SOULS } from "../theme";
+import { GROUP_COLORS, SOULS } from "../theme";
+import { Button } from "../ui/button";
+import { Input, Select } from "../ui/field";
 
 type Props = { lobby: LobbySnapshot; game: PublicGameState };
 
@@ -25,7 +28,7 @@ function describeBundle(bundle: TradeBundle, board: BoardDefinition): string {
   return parts.length > 0 ? parts.join(", ") : "nothing";
 }
 
-export function TradePanel({ lobby, game }: Props) {
+export function TradesTab({ lobby, game }: Props) {
   const { playerId, pendingActionId } = useConnection();
   const [building, setBuilding] = useState(false);
   const board = getBoard(game.config.boardId);
@@ -37,80 +40,77 @@ export function TradePanel({ lobby, game }: Props) {
   const me = game.players.find((p) => p.id === playerId);
   const pending = pendingActionId !== null;
 
+  if (building && playerId) {
+    return (
+      <TradeBuilder lobby={lobby} game={game} myId={playerId} onDone={() => setBuilding(false)} />
+    );
+  }
+
   return (
-    <section className="panel flex flex-col gap-3 p-4" aria-labelledby="trades-heading">
-      <div className="flex items-center justify-between">
-        <h2 id="trades-heading" className="font-display text-lg">
-          Trades
-        </h2>
-        {me && !me.bankrupt && !building && (
-          <button
-            type="button"
-            className="btn-ghost px-2 py-1 text-sm"
-            onClick={() => setBuilding(true)}
-          >
-            New offer
-          </button>
-        )}
-      </div>
-
-      {building && playerId && (
-        <TradeBuilder lobby={lobby} game={game} myId={playerId} onDone={() => setBuilding(false)} />
+    <div className="flex flex-col gap-3">
+      {me && !me.bankrupt && (
+        <Button variant="outline" className="w-full" onClick={() => setBuilding(true)}>
+          <Plus />
+          New offer
+        </Button>
       )}
-
-      {mine.length === 0 && !building && (
-        <p className="text-sm text-parchment-dim">No open offers.</p>
-      )}
-      <ul className="flex flex-col gap-3">
+      {mine.length === 0 && <p className="py-6 text-center text-sm text-muted">No open offers.</p>}
+      <ul className="flex flex-col gap-2">
         {mine.map((trade) => (
-          <li key={trade.id} className="rounded-sm border border-brass-dim/40 p-2 text-sm">
-            <p>
+          <li key={trade.id} className="rounded-lg border border-line bg-surface-2 p-3 text-sm">
+            <p className="flex items-center gap-1.5 text-xs font-medium text-muted">
+              <ArrowRightLeft className="size-3.5" aria-hidden />
+              {trade.from === playerId ? `You → ${name(trade.to)}` : `${name(trade.from)} → you`}
+            </p>
+            <p className="mt-1">
               {trade.from === playerId ? "You offer" : `${name(trade.from)} offers`}{" "}
               {describeBundle(trade.offer, board)}
             </p>
-            <p>
+            <p className="text-muted">
               for {trade.to === playerId ? "your" : `${name(trade.to)}'s`}{" "}
               {describeBundle(trade.request, board)}
             </p>
-            <div className="mt-2 flex flex-wrap gap-2">
+            <div className="mt-2.5 flex flex-wrap gap-2">
               {can("acceptTrade", trade) && (
-                <button
-                  type="button"
-                  className="btn-primary px-3 py-1 text-sm"
+                <Button
+                  variant="primary"
+                  size="sm"
                   disabled={pending}
                   onClick={() => sendAction({ type: "acceptTrade", tradeId: trade.id })}
                 >
                   Accept
-                </button>
+                </Button>
               )}
               {can("rejectTrade", trade) && (
-                <button
-                  type="button"
-                  className="btn-ghost px-3 py-1 text-sm"
+                <Button
+                  variant="outline"
+                  size="sm"
                   disabled={pending}
                   onClick={() => sendAction({ type: "rejectTrade", tradeId: trade.id })}
                 >
                   Decline
-                </button>
+                </Button>
               )}
               {can("cancelTrade", trade) && (
-                <button
-                  type="button"
-                  className="btn-ghost px-3 py-1 text-sm"
+                <Button
+                  variant="ghost"
+                  size="sm"
                   disabled={pending}
                   onClick={() => sendAction({ type: "cancelTrade", tradeId: trade.id })}
                 >
                   Withdraw
-                </button>
+                </Button>
               )}
               {trade.to === playerId && !can("acceptTrade", trade) && (
-                <span className="text-xs text-parchment-dim">Can't accept during an auction</span>
+                <span className="self-center text-xs text-muted">
+                  Can't accept during an auction
+                </span>
               )}
             </div>
           </li>
         ))}
       </ul>
-    </section>
+    </div>
   );
 }
 
@@ -124,21 +124,15 @@ function TradeBuilder({ lobby, game, myId, onDone }: Props & { myId: string; onD
   const [request, setRequest] = useState(emptyBundle);
   const me = game.players.find((p) => p.id === myId);
   const them = game.players.find((p) => p.id === to);
-  if (!me || !them) return <p className="text-sm text-parchment-dim">Nobody to trade with.</p>;
+  if (!me || !them) return <p className="text-sm text-muted">Nobody to trade with.</p>;
 
   const problem = proposalProblem(game, board, { from: myId, to, offer, request });
 
-  const submit = () => {
-    sendAction({ type: "proposeTrade", to, offer, request });
-    onDone();
-  };
-
   return (
-    <div className="flex flex-col gap-3 rounded-sm border border-brass-dim/60 p-3">
-      <label className="flex items-center justify-between gap-2 text-sm">
+    <div className="flex flex-col gap-4">
+      <label className="flex items-center justify-between gap-3 text-sm font-medium">
         Trade with
-        <select
-          className="input w-auto py-1"
+        <Select
           value={to}
           onChange={(e) => {
             setTo(e.target.value);
@@ -150,41 +144,42 @@ function TradeBuilder({ lobby, game, myId, onDone }: Props & { myId: string; onD
               {lobby.players.find((lp) => lp.id === p.id)?.name ?? p.name}
             </option>
           ))}
-        </select>
+        </Select>
       </label>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
-        <BundleEditor
-          title="You give"
-          game={game}
-          ownerId={myId}
-          cashLimit={me.cash}
-          cards={me.getOutCards}
-          bundle={offer}
-          onChange={setOffer}
-        />
-        <BundleEditor
-          title={`${them.name} gives`}
-          game={game}
-          ownerId={to}
-          cashLimit={them.cash}
-          cards={them.getOutCards}
-          bundle={request}
-          onChange={setRequest}
-        />
-      </div>
-      {problem && <p className="text-xs text-blood">{problem}</p>}
+      <BundleEditor
+        title="You give"
+        game={game}
+        ownerId={myId}
+        cashLimit={me.cash}
+        cards={me.getOutCards}
+        bundle={offer}
+        onChange={setOffer}
+      />
+      <BundleEditor
+        title={`${them.name} gives`}
+        game={game}
+        ownerId={to}
+        cashLimit={them.cash}
+        cards={them.getOutCards}
+        bundle={request}
+        onChange={setRequest}
+      />
+      {problem && <p className="text-xs text-danger">{problem}</p>}
       <div className="flex gap-2">
-        <button
-          type="button"
-          className="btn-primary text-sm"
+        <Button
+          variant="primary"
+          className="flex-1"
           disabled={problem !== null}
-          onClick={submit}
+          onClick={() => {
+            sendAction({ type: "proposeTrade", to, offer, request });
+            onDone();
+          }}
         >
           Send offer
-        </button>
-        <button type="button" className="btn-ghost text-sm" onClick={onDone}>
+        </Button>
+        <Button variant="ghost" onClick={onDone}>
           Cancel
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -219,15 +214,16 @@ function BundleEditor({
         ? bundle.spaces.filter((s) => s !== i)
         : [...bundle.spaces, i],
     });
-  const cardsOffered = bundle.getOutCards.length;
 
   return (
-    <fieldset className="flex min-w-0 flex-col gap-2 text-sm">
-      <legend className="mb-1 font-medium text-brass">{title}</legend>
+    <fieldset className="flex min-w-0 flex-col gap-2 rounded-lg border border-line p-3 text-sm">
+      <legend className="px-1 text-xs font-semibold tracking-wide text-muted uppercase">
+        {title}
+      </legend>
       <label className="flex items-center gap-2">
-        <span className="shrink-0">Souls</span>
-        <input
-          className="input py-1"
+        <span className="w-12 shrink-0 text-muted">Souls</span>
+        <Input
+          className="h-9"
           type="number"
           min={0}
           max={cashLimit}
@@ -238,20 +234,27 @@ function BundleEditor({
           }
         />
       </label>
-      {owned.length === 0 && <p className="text-xs text-parchment-dim">No properties</p>}
-      <ul className="flex max-h-40 flex-col gap-1 overflow-y-auto">
+      {owned.length === 0 && <p className="text-xs text-muted">No properties</p>}
+      <ul className="flex max-h-36 flex-col overflow-y-auto">
         {owned.map(({ index, space }) => (
           <li key={index}>
-            <label className="flex items-center gap-2">
+            <label className="flex items-center gap-2 rounded-md px-1 py-1 hover:bg-surface-2">
               <input
                 type="checkbox"
-                className="accent-amber"
+                className="size-4 accent-[var(--accent)]"
                 checked={bundle.spaces.includes(index)}
                 onChange={() => toggleSpace(index)}
               />
+              {space.kind === "property" && (
+                <span
+                  className="h-3 w-1 shrink-0 rounded-full"
+                  style={{ background: GROUP_COLORS[space.group] }}
+                  aria-hidden
+                />
+              )}
               <span className="truncate">
                 {space.name}
-                {game.sealed[index] && <span className="text-parchment-dim"> (sealed)</span>}
+                {game.sealed[index] && <span className="text-muted"> (sealed)</span>}
               </span>
             </label>
           </li>
@@ -261,8 +264,8 @@ function BundleEditor({
         <label className="flex items-center gap-2">
           <input
             type="checkbox"
-            className="accent-amber"
-            checked={cardsOffered > 0}
+            className="size-4 accent-[var(--accent)]"
+            checked={bundle.getOutCards.length > 0}
             onChange={(e) =>
               onChange({ ...bundle, getOutCards: e.target.checked ? [cards[0] as DeckId] : [] })
             }

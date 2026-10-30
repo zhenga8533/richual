@@ -16,9 +16,14 @@
   "dependencies": {
     "@richual/engine": "workspace:*",
     "@richual/protocol": "workspace:*",
+    "class-variance-authority": "0.7.1",
+    "clsx": "2.1.1",
     "hono": "4.13.14",
+    "lucide-react": "1.65.0",
+    "radix-ui": "1.8.1",
     "react": "19.3.1",
     "react-dom": "19.3.1",
+    "tailwind-merge": "3.7.0",
     "zod": "4.6.7",
     "zustand": "5.0.16"
   },

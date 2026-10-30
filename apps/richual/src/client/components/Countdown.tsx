@@ -1,3 +1,4 @@
+import { Hourglass } from "lucide-react";
 import { useEffect, useState } from "react";
 import { serverNow } from "../connection";
 
@@ -27,10 +28,13 @@ export function Countdown({ deadline }: { deadline: number }) {
   const urgent = left < 10_000;
   return (
     <span
-      className={`tabular-nums text-sm ${urgent ? "text-blood" : "text-parchment-dim"}`}
+      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium tabular-nums ${
+        urgent ? "bg-danger-soft text-danger" : "bg-surface-2 text-muted"
+      }`}
       title="Auto-played when this runs out"
     >
-      ⏳ {Math.ceil(left / 1000)}s
+      <Hourglass className="size-3" aria-hidden />
+      {Math.ceil(left / 1000)}s
     </span>
   );
 }

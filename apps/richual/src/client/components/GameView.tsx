@@ -1,34 +1,74 @@
-import { getBoard, getLegalActions, type PublicGameState, type Standing } from "@richual/engine";
+import { getBoard, getLegalActions, type PublicGameState } from "@richual/engine";
 import type { LobbySnapshot } from "@richual/protocol";
-import { useEffect, useRef, useState } from "react";
-import { useAlertPreference, useNeedsYouAlert } from "../alerts";
-import { type LoggedEvent, send, useConnection } from "../connection";
+import { X } from "lucide-react";
+import { type RefObject, useCallback, useEffect, useRef, useState } from "react";
+import { useNeedsYouAlert, useNotificationPreference } from "../alerts";
+import { type LoggedEvent, useConnection } from "../connection";
 import { describeEvent } from "../describe";
-import { initials, SOULS, seatColor } from "../theme";
-import { ActionPanel } from "./ActionPanel";
+import { useGameFeedback } from "../gameFeedback";
+import { SHORTCUTS, useShortcuts } from "../shortcuts";
+import { SOULS } from "../theme";
+import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
+import { Card } from "../ui/card";
+import { cn } from "../ui/cn";
+import {
+  PopoverAnchor,
+  PopoverContent,
+  PopoverRoot,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "../ui/radix";
+import { ActionCard } from "./ActionCard";
 import { Board } from "./Board";
-import { ChatPanel } from "./ChatPanel";
-import { GameBar } from "./GameBar";
+import { Chat } from "./ChatPanel";
+import { GameToolbar } from "./GameToolbar";
 import { heroLabel } from "./heroLabel";
-import { PropertyPanel } from "./PropertyPanel";
-import { TradePanel } from "./TradePanel";
+import { PlayerAvatar } from "./PlayerAvatar";
+import { PropertyDetails } from "./PropertyDetails";
+import { TradesTab } from "./TradesTab";
+
+const TABS = ["players", "trades", "log", "chat"] as const;
+type Tab = (typeof TABS)[number];
 
 export function GameView({ lobby, game }: { lobby: LobbySnapshot; game: PublicGameState }) {
-  const { playerId, log } = useConnection();
+  const { playerId, log, historySeq, pendingActionId } = useConnection();
   const [selected, setSelected] = useState<number | null>(null);
-  const [alertsOn, setAlertsOn] = useAlertPreference();
+  const [tab, setTab] = useState<Tab>("players");
+  const [showShortcuts, setShowShortcuts] = useState(false);
+  const [previewOwner, setPreviewOwner] = useState<string | null>(null);
+  const [pinnedOwner, setPinnedOwner] = useState<string | null>(null);
+  const [seenChatId, setSeenChatId] = useState(() => lobby.chat.at(-1)?.id ?? 0);
+  const [attention, setAttention] = useState(0);
+  const anchor = useRef<HTMLElement | null>(null);
+  const [notify, setNotify] = useNotificationPreference();
+
+  const lastChatId = lobby.chat.at(-1)?.id ?? 0;
+  useEffect(() => {
+    if (tab === "chat") setSeenChatId(lastChatId);
+  }, [tab, lastChatId]);
+  const unreadChat = lobby.chat.filter((m) => m.id > seenChatId && m.playerId !== playerId).length;
+  const incomingTrades = game.trades.filter((t) => t.to === playerId).length;
+
   const lastDraw = log.findLast((l) => l.event.type === "cardDrawn");
   const lastCard =
     lastDraw?.event.type === "cardDrawn"
       ? { seq: lastDraw.seq, deck: lastDraw.event.deck, cardId: lastDraw.event.cardId }
       : null;
+
   // Anything but withdrawing your own offer means the game is waiting on you.
   const needsMe =
     !lobby.paused &&
     playerId !== null &&
     getLegalActions(game, playerId).some((a) => a.type !== "cancelTrade");
-
-  useNeedsYouAlert(needsMe, alertsOn, "It's your move.");
+  useNeedsYouAlert(needsMe, notify, "It's your move.");
+  const wasNeeded = useRef(needsMe);
+  useEffect(() => {
+    if (needsMe && !wasNeeded.current) setAttention((n) => n + 1);
+    wasNeeded.current = needsMe;
+  }, [needsMe]);
   useEffect(() => {
     document.title = needsMe ? `${SOULS} Your move — Richual` : "Richual";
     return () => {
@@ -36,179 +76,212 @@ export function GameView({ lobby, game }: { lobby: LobbySnapshot; game: PublicGa
     };
   }, [needsMe]);
 
+  useGameFeedback(log, historySeq, playerId, lobby);
+  useShortcuts({
+    game,
+    playerId,
+    paused: lobby.paused,
+    pending: pendingActionId !== null,
+    onTab: useCallback((i: number) => setTab(TABS[i] ?? "players"), []),
+    onToggleHelp: useCallback(() => setShowShortcuts((s) => !s), []),
+  });
+
   return (
-    <div className="grid w-full max-w-7xl grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
-      <div className="lg:col-span-2">
-        <GameBar lobby={lobby} game={game} alertsOn={alertsOn} onAlertsChange={setAlertsOn} />
-      </div>
-      <div className="mx-auto w-full max-w-[min(100%,calc(100dvh-10rem))]">
-        <Board
-          game={game}
-          players={lobby.players}
-          myId={playerId}
-          selected={selected}
-          onSelect={(space) => setSelected(space === selected ? null : space)}
-          lastCard={lastCard}
-        />
-      </div>
-      <aside className="flex min-w-0 flex-col gap-4">
-        {game.phase.kind === "gameOver" ? (
-          <GameOver
-            lobby={lobby}
-            winnerId={game.phase.winnerId}
-            reason={game.phase.reason}
-            standings={game.phase.standings}
-          />
-        ) : (
-          <ActionPanel lobby={lobby} game={game} />
-        )}
-        {selected !== null && (
-          <PropertyPanel
-            lobby={lobby}
+    <div className="grid w-full grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_23rem] lg:items-start">
+      <PopoverRoot
+        open={selected !== null}
+        onOpenChange={(open) => {
+          if (!open) setSelected(null);
+        }}
+      >
+        <PopoverAnchor virtualRef={anchor as RefObject<HTMLElement>} />
+        {/* As large as the window allows while staying square and fully visible. */}
+        <div className="mx-auto w-full max-w-[min(100%,calc(100dvh-5.5rem))]">
+          <Board
             game={game}
-            space={selected}
-            onClose={() => setSelected(null)}
+            players={lobby.players}
+            myId={playerId}
+            selected={selected}
+            anchorRef={anchor}
+            onSelect={(space) => setSelected(space === selected ? null : space)}
+            lastCard={lastCard}
+            highlightOwner={previewOwner ?? pinnedOwner}
           />
+        </div>
+        {selected !== null && (
+          <PopoverContent side="right" align="center" aria-labelledby="property-heading">
+            <PropertyDetails lobby={lobby} game={game} space={selected} />
+          </PopoverContent>
         )}
-        <Players lobby={lobby} game={game} />
-        {game.phase.kind !== "gameOver" && <TradePanel lobby={lobby} game={game} />}
-        <EventLog log={log} lobby={lobby} game={game} />
-        <ChatPanel lobby={lobby} />
+      </PopoverRoot>
+
+      <aside className="flex min-w-0 flex-col gap-3 lg:sticky lg:top-3 lg:max-h-[calc(100dvh-4.5rem)]">
+        <GameToolbar
+          lobby={lobby}
+          game={game}
+          notify={notify}
+          onNotifyChange={setNotify}
+          onShowShortcuts={() => setShowShortcuts((s) => !s)}
+        />
+        {showShortcuts && <ShortcutHelp onClose={() => setShowShortcuts(false)} />}
+        <ActionCard lobby={lobby} game={game} attention={attention} />
+        <Card className="flex min-h-0 flex-col p-2 lg:flex-1">
+          <Tabs
+            value={tab}
+            onValueChange={(v) => setTab(v as Tab)}
+            className="flex min-h-0 flex-1 flex-col"
+          >
+            <TabsList aria-label="Game details">
+              <TabsTrigger value="players">Players</TabsTrigger>
+              <TabsTrigger value="trades">
+                Trades
+                {incomingTrades > 0 && (
+                  <Badge variant="solid" className="px-1.5 py-0">
+                    {incomingTrades}
+                  </Badge>
+                )}
+              </TabsTrigger>
+              <TabsTrigger value="log">Log</TabsTrigger>
+              <TabsTrigger value="chat">
+                Chat
+                {unreadChat > 0 && (
+                  <Badge variant="solid" className="px-1.5 py-0">
+                    {unreadChat}
+                  </Badge>
+                )}
+              </TabsTrigger>
+            </TabsList>
+            <div className="h-[min(24rem,60dvh)] overflow-y-auto px-2 pt-3 pb-2 lg:h-auto lg:min-h-48 lg:flex-1">
+              <TabsContent value="players">
+                <Players
+                  lobby={lobby}
+                  game={game}
+                  pinned={pinnedOwner}
+                  onPreview={setPreviewOwner}
+                  onPin={(id) => setPinnedOwner((p) => (p === id ? null : id))}
+                />
+              </TabsContent>
+              <TabsContent value="trades">
+                <TradesTab lobby={lobby} game={game} />
+              </TabsContent>
+              <TabsContent value="log">
+                <EventLog log={log} lobby={lobby} game={game} />
+              </TabsContent>
+              <TabsContent value="chat" className="h-full">
+                <Chat lobby={lobby} className="h-full min-h-48" />
+              </TabsContent>
+            </div>
+          </Tabs>
+        </Card>
       </aside>
     </div>
   );
 }
 
-const END_REASONS: Record<string, string> = {
-  lastStanding: "Every rival is soul-bankrupt.",
-  bankruptcies: "The bankruptcy limit was reached; ranked by net worth.",
-  roundLimit: "The round limit was reached; ranked by net worth.",
-  timeLimit: "Time ran out and the final round finished; ranked by net worth.",
-  endedEarly: "The host ended the game early. This is a provisional result by net worth.",
-};
-
-function GameOver({
-  lobby,
-  winnerId,
-  reason,
-  standings,
-}: {
-  lobby: LobbySnapshot;
-  winnerId: string;
-  reason: string;
-  standings: Standing[];
-}) {
-  const { playerId } = useConnection();
-  const name = (id: string) => lobby.players.find((p) => p.id === id)?.name ?? "Someone";
+function ShortcutHelp({ onClose }: { onClose: () => void }) {
   return (
-    <section className="panel flex flex-col gap-3 p-4" aria-live="polite">
-      <h2 className="font-display text-2xl text-brass">
-        {winnerId === playerId ? "You win the ritual!" : `${name(winnerId)} wins!`}
-        {reason === "endedEarly" && (
-          <span className="ml-2 align-middle text-xs text-amber">Provisional</span>
-        )}
-      </h2>
-      <p className="text-sm text-parchment-dim">{END_REASONS[reason]}</p>
-      <table className="w-full text-sm">
-        <caption className="sr-only">Final standings</caption>
-        <thead className="text-left text-xs text-parchment-dim">
-          <tr>
-            <th scope="col">#</th>
-            <th scope="col">Player</th>
-            <th scope="col" className="text-right">
-              Souls
-            </th>
-            <th scope="col" className="text-right">
-              Holdings
-            </th>
-            <th scope="col" className="text-right">
-              Buildings
-            </th>
-            <th scope="col" className="text-right">
-              Net worth
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {standings.map((st) => (
-            <tr key={st.playerId} className={st.bankrupt ? "opacity-50" : ""}>
-              <td>{st.rank}</td>
-              <td className={st.playerId === playerId ? "font-semibold" : ""}>
-                {name(st.playerId)}
-                {st.bankrupt && <span className="text-parchment-dim"> (bankrupt)</span>}
-              </td>
-              <td className="text-right tabular-nums">{st.cash}</td>
-              <td className="text-right tabular-nums">{st.propertyValue}</td>
-              <td className="text-right tabular-nums">{st.buildingValue}</td>
-              <td className="text-right tabular-nums text-amber">
-                {st.netWorth} {SOULS}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {playerId === lobby.hostId ? (
-        <button
-          type="button"
-          className="btn-primary"
-          onClick={() => send({ type: "returnToLobby" })}
-        >
-          Back to lobby
-        </button>
-      ) : (
-        <p className="text-sm text-parchment-dim">The host can start another game.</p>
-      )}
-    </section>
+    <Card className="card-reveal p-3" aria-labelledby="shortcuts-heading">
+      <div className="mb-2 flex items-center justify-between">
+        <h2 id="shortcuts-heading" className="text-sm font-semibold">
+          Keyboard shortcuts
+        </h2>
+        <Button variant="ghost" size="icon" className="size-7" onClick={onClose} aria-label="Close">
+          <X />
+        </Button>
+      </div>
+      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-sm">
+        {SHORTCUTS.map((s) => (
+          <div key={s.keys} className="contents">
+            <dt>
+              <kbd className="rounded border border-line-strong bg-surface-2 px-1.5 py-0.5 font-mono text-xs">
+                {s.keys}
+              </kbd>
+            </dt>
+            <dd className="text-muted">{s.does}</dd>
+          </div>
+        ))}
+      </dl>
+    </Card>
   );
 }
 
-function Players({ lobby, game }: { lobby: LobbySnapshot; game: PublicGameState }) {
+function Players({
+  lobby,
+  game,
+  pinned,
+  onPreview,
+  onPin,
+}: {
+  lobby: LobbySnapshot;
+  game: PublicGameState;
+  pinned: string | null;
+  onPreview: (id: string | null) => void;
+  onPin: (id: string) => void;
+}) {
   const { playerId } = useConnection();
   const current = game.players[game.turn.playerIndex];
   return (
-    <section className="panel p-4" aria-labelledby="game-players">
-      <h2 id="game-players" className="mb-2 font-display text-lg">
-        Players
-      </h2>
-      <ul className="flex flex-col gap-2">
+    <div className="flex flex-col gap-2">
+      <ul className="flex flex-col gap-1" aria-label="Players">
         {game.players.map((p) => {
           const info = lobby.players.find((lp) => lp.id === p.id);
           const owned = game.owners.filter((o) => o === p.id).length;
+          const isCurrent = p.id === current?.id && game.phase.kind !== "gameOver";
           return (
-            <li
-              key={p.id}
-              className={`flex items-center gap-3 rounded-sm px-2 py-1 ${
-                p.id === current?.id ? "bg-smoke-light" : ""
-              } ${p.bankrupt ? "opacity-50" : ""}`}
-            >
-              <span
-                className="grid size-7 shrink-0 place-items-center rounded-full text-xs font-semibold text-ink"
-                style={{ background: seatColor(info?.seat ?? 0) }}
-                aria-hidden
+            <li key={p.id}>
+              <button
+                type="button"
+                aria-pressed={pinned === p.id}
+                aria-label={`${p.name}: show their holdings on the board`}
+                onMouseEnter={() => onPreview(p.id)}
+                onMouseLeave={() => onPreview(null)}
+                onFocus={() => onPreview(p.id)}
+                onBlur={() => onPreview(null)}
+                onClick={() => onPin(p.id)}
+                className={cn(
+                  "flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-surface-2",
+                  isCurrent && "bg-accent-soft hover:bg-accent-soft",
+                  pinned === p.id && "ring-2 ring-accent ring-inset",
+                  p.bankrupt && "opacity-50",
+                )}
               >
-                {initials(heroLabel(info?.hero ?? null, p.name))}
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className={`truncate ${p.id === playerId ? "font-semibold" : ""}`}>
-                  {p.name}
-                  {p.id === playerId && <span className="text-parchment-dim"> (you)</span>}
-                </p>
-                <p className="text-xs text-parchment-dim">
-                  {heroLabel(info?.hero ?? null, "")} · {owned} owned
-                  {p.inJail && " · in the Lost Whisper"}
-                  {p.getOutCards.length > 0 && ` · ${p.getOutCards.length} escape card`}
-                  {p.bankrupt && " · bankrupt"}
-                  {info && !info.connected && " · offline"}
-                </p>
-              </div>
-              <span className="tabular-nums text-amber">
-                {p.cash} {SOULS}
-              </span>
+                <PlayerAvatar
+                  seat={info?.seat ?? 0}
+                  hero={info?.hero ?? null}
+                  name={p.name}
+                  online={info?.connected}
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-1.5 truncate font-medium">
+                    {p.name}
+                    {p.id === playerId && <Badge>You</Badge>}
+                    {isCurrent && <Badge variant="accent">Turn</Badge>}
+                  </span>
+                  <span className="block truncate text-xs text-muted">
+                    {[
+                      heroLabel(info?.hero ?? null, ""),
+                      `${owned} owned`,
+                      p.inJail && "in the Lost Whisper",
+                      p.getOutCards.length > 0 && `${p.getOutCards.length} escape card`,
+                      p.bankrupt && "bankrupt",
+                      info && !info.connected && "offline",
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </span>
+                </span>
+                <span className="font-semibold tabular-nums">
+                  {p.cash} <span className="text-accent-text">{SOULS}</span>
+                </span>
+              </button>
             </li>
           );
         })}
       </ul>
-    </section>
+      <p className="px-2 text-xs text-muted">
+        Hover or tap a player to see what they own on the board.
+      </p>
+    </div>
   );
 }
 
@@ -236,26 +309,26 @@ function EventLog({
   }, [log]);
 
   return (
-    <section className="panel flex max-h-80 min-h-40 flex-col p-4" aria-labelledby="game-log">
-      <h2 id="game-log" className="mb-2 font-display text-lg">
-        Ritual log
-      </h2>
-      <ol className="flex-1 space-y-1 overflow-y-auto text-sm" aria-live="polite">
-        {lines.length === 0 && <li className="text-parchment-dim">Nothing has happened yet.</li>}
-        {lines.map((l) => (
+    <ol className="space-y-1 text-sm" aria-live="polite" aria-label="Ritual log">
+      {lines.length === 0 && (
+        <li className="py-6 text-center text-muted">Nothing has happened yet.</li>
+      )}
+      {lines.map((l) =>
+        l.event.type === "turnStarted" ? (
           <li
             key={l.seq}
-            className={
-              l.event.type === "turnStarted"
-                ? "mt-2 border-t border-brass-dim/40 pt-1 text-xs uppercase tracking-wider text-brass"
-                : "text-parchment"
-            }
+            className="flex items-center gap-2 pt-3 pb-1 text-xs font-semibold tracking-wide text-accent-text uppercase"
           >
             {l.text}
+            <span className="h-px flex-1 bg-line" aria-hidden />
           </li>
-        ))}
-        <li ref={end} aria-hidden />
-      </ol>
-    </section>
+        ) : (
+          <li key={l.seq} className="text-fg/90">
+            {l.text}
+          </li>
+        ),
+      )}
+      <li ref={end} aria-hidden />
+    </ol>
   );
 }
