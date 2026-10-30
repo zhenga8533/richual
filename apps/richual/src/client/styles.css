@@ -13,7 +13,7 @@
   --color-parchment-dim: #b8ad94;
   --color-amber: #e0a43a;
   --color-sapphire: #4f7fd1;
-  --color-blood: #b8453a;
+  --color-blood: #e57361;
 }
 
 @layer base {
@@ -61,4 +61,48 @@
     /* biome-ignore lint/complexity/noImportantStyles: must override all component styles */
     transition-duration: 0.01ms !important;
   }
+}
+
+/* A double brass rule with stepped deco corners around the board. */
+.deco-frame {
+  background:
+    linear-gradient(var(--color-ink), var(--color-ink)) padding-box,
+    linear-gradient(135deg, var(--color-brass), var(--color-brass-dim) 40%, var(--color-brass))
+    border-box;
+  border: 2px solid transparent;
+  box-shadow:
+    0 0 0 4px var(--color-ink),
+    0 0 0 5px var(--color-brass-dim),
+    0 12px 40px rgb(0 0 0 / 0.6);
+}
+
+@keyframes card-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.card-reveal {
+  animation: card-reveal 220ms ease-out;
+}
+
+@keyframes dice-roll {
+  0% {
+    transform: rotate(-8deg) scale(0.9);
+  }
+  60% {
+    transform: rotate(4deg) scale(1.04);
+  }
+  100% {
+    transform: none;
+  }
+}
+
+.dice-roll {
+  animation: dice-roll 280ms ease-out;
 }

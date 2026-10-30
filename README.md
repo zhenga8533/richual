@@ -8,6 +8,17 @@ matchmaking queues: games persist across sessions and can be paused, resumed and
 > and lore belong to Valve. All artwork, icons and card text in this repository are original. This is
 > a non-commercial project; review Valve's and Hasbro's IP terms before making it publicly available.
 
+## Features
+
+- Private lobbies for 2–6 players by invite link; guest names, no accounts
+- Classic and Quick modes, optional round or play-time limits scored by net worth
+- Auctions, building, sealing, trading, raising funds and bankruptcy, all enforced by the server
+- Host pause/resume and end-early, optional turn timer with safe auto-play, host handover
+- Reconnect from the same browser at any time; games are kept for 7 days of inactivity
+- Chat, turn alerts, and a layout that works on a second monitor or a phone
+
+Player rules: [docs/RULES.md](docs/RULES.md).
+
 ## Stack
 
 | Layer       | Choice                                                                              |
@@ -21,9 +32,10 @@ matchmaking queues: games persist across sessions and can be paused, resumed and
 ## Repository layout
 
 ```
-apps/richual/        Deployable Worker: src/worker (API + LobbyDO), src/client (SPA), test/
-packages/engine/     Pure, deterministic game rules (no IO, seeded RNG)
-packages/protocol/   Client/server message schemas and protocol version
+apps/richual/        Deployable Worker: src/worker (API + LobbyDO), src/client (SPA), test/, e2e/
+packages/engine/     Pure, deterministic game rules (no IO, seeded RNG), scoring, simulator
+packages/protocol/   Client/server message schemas, lobby settings and protocol version
+docs/                Player-facing rules
 ```
 
 ## Development
@@ -62,4 +74,20 @@ to `main` then deploy to `richual.<account>.workers.dev`. This needs two reposit
 - `CLOUDFLARE_ACCOUNT_ID`
 - `CLOUDFLARE_API_TOKEN`: a token created from the **Edit Cloudflare Workers** template
 
-Everything runs within the Cloudflare Workers free plan at friend-group scale.
+Everything runs within the Cloudflare Workers free plan at friend-group scale. Security headers
+(including a strict Content Security Policy) are set for the static site in
+`apps/richual/public/_headers`.
+
+## Architecture notes
+
+- **The engine is the only rules authority.** `applyAction` is pure and deterministic: the seeded RNG
+  lives in the game state, so any game can be replayed from its action log. The client imports the
+  engine only to show which actions are legal.
+- **One Durable Object per lobby** serializes every message, validates it with Zod and the engine,
+  and persists the new state, action log and version in one SQLite transaction. Clients send the
+  version they acted on; stale actions are refused with a fresh snapshot, and resent actions are
+  acknowledged without being applied twice.
+- **One alarm** drives every deadline: decision timers, the time limit, host handover and idle
+  cleanup.
+- **Schemas evolve append-only**: `apps/richual/src/worker/schema.ts` for lobby storage and
+  `packages/engine/src/migrations.ts` for saved games.

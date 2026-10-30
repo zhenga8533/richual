@@ -284,7 +284,7 @@ function DebtPanel({ lobby, game }: Props) {
           <>
             <button
               type="button"
-              className="btn border-blood bg-blood text-parchment"
+              className="btn border-blood bg-blood text-ink"
               disabled={pending}
               onClick={() => sendAction({ type: "declareBankruptcy" })}
             >

@@ -103,6 +103,8 @@ function handleMessage(msg: ServerMessage): void {
         status: "open",
         playerId: msg.playerId,
         lobby: msg.lobby,
+        // The server's recent history replaces whatever this tab had, so a reload loses nothing.
+        log: msg.events.map((event) => ({ seq: ++logSeq, event })).slice(-MAX_LOG),
         clockOffset: msg.lobby.serverNow - Date.now(),
         error: null,
         // Anything in flight before a reconnect is reflected in this snapshot.

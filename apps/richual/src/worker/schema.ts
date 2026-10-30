@@ -45,6 +45,10 @@ const MIGRATIONS: readonly string[] = [
      text TEXT NOT NULL,
      at INTEGER NOT NULL
    );`,
+  `CREATE TABLE event_log (
+     seq INTEGER PRIMARY KEY AUTOINCREMENT,
+     events_json TEXT NOT NULL
+   );`,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

@@ -6,6 +6,7 @@ import {
   connect,
   createLobby,
   currentPlayerId,
+  hello,
   joinLobby,
   openSocket,
   post,
@@ -211,6 +212,23 @@ describe("game actions", () => {
     expect(restored.version).toBe(after.version);
     expect(restored.game).toEqual(after.game);
   }, 20_000);
+});
+
+describe("event history", () => {
+  it("sends recent events to a reconnecting player", async () => {
+    const { lobby, current, hostSession } = await startedGame();
+    current.socket.send({
+      type: "action",
+      clientActionId: crypto.randomUUID(),
+      expectedVersion: lobby.version,
+      action: { type: "roll" },
+    });
+    await current.socket.until("ack");
+    const socket = await hello(hostSession.code, hostSession.token);
+    const welcome = await socket.until("welcome");
+    expect(welcome.events[0]).toMatchObject({ type: "turnStarted" });
+    expect(welcome.events).toContainEqual(expect.objectContaining({ type: "rolled" }));
+  });
 });
 
 describe("off-turn actions", () => {

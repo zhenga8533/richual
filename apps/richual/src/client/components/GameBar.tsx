@@ -73,7 +73,7 @@ export function GameBar({ lobby, game, alertsOn, onAlertsChange }: Props) {
               <>
                 <button
                   type="button"
-                  className="btn border-blood bg-blood px-3 py-1 text-sm text-parchment"
+                  className="btn border-blood bg-blood px-3 py-1 text-sm text-ink"
                   onClick={() => {
                     send({ type: "endGame" });
                     setConfirmEnd(false);

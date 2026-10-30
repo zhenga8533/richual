@@ -39,6 +39,8 @@ export const HELLO_TIMEOUT_MS = 5_000;
 /** How long the host may be disconnected before hosting passes to someone else. */
 export const HOST_GRACE_MS = 2 * 60 * 1000;
 const CHAT_HISTORY = 30;
+/** Event batches (one per state change) kept for reconnecting clients' logs. */
+const EVENT_HISTORY = 40;
 /** Token bucket per socket: bursts of this many messages, refilled at RATE_REFILL_PER_SEC. */
 const RATE_BURST = 20;
 const RATE_REFILL_PER_SEC = 5;
@@ -313,7 +315,12 @@ export class LobbyDO extends DurableObject<Env> {
       // The host left while nobody else was here to take over; start the clock now.
       this.sql.exec("UPDATE lobby SET host_check_at = ? WHERE id = 1", now + HOST_GRACE_MS);
     }
-    send(ws, { type: "welcome", playerId: player.id, lobby: this.snapshot() });
+    send(ws, {
+      type: "welcome",
+      playerId: player.id,
+      lobby: this.snapshot(),
+      events: this.recentEvents(),
+    });
     this.broadcast([], undefined, ws);
     await this.scheduleAlarm();
   }
@@ -363,8 +370,12 @@ export class LobbyDO extends DurableObject<Env> {
       seed,
     );
     const now = Date.now();
+    const first = state.players[state.turn.playerIndex];
+    const events: GameEvent[] = first ? [{ type: "turnStarted", playerId: first.id }] : [];
     this.ctx.storage.transactionSync(() => {
       this.sql.exec("DELETE FROM actions");
+      this.sql.exec("DELETE FROM event_log");
+      this.recordEvents(events);
       this.sql.exec(
         "INSERT INTO game (id, state_json, updated_at) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET state_json = excluded.state_json, updated_at = excluded.updated_at",
         JSON.stringify(state),
@@ -377,8 +388,7 @@ export class LobbyDO extends DurableObject<Env> {
       );
       this.bumpVersion(now);
     });
-    const first = state.players[state.turn.playerIndex];
-    this.broadcast(first ? [{ type: "turnStarted", playerId: first.id }] : []);
+    this.broadcast(events);
   }
 
   private returnToLobby(playerId: string): void {
@@ -387,6 +397,7 @@ export class LobbyDO extends DurableObject<Env> {
     this.ctx.storage.transactionSync(() => {
       this.sql.exec("DELETE FROM game");
       this.sql.exec("DELETE FROM actions");
+      this.sql.exec("DELETE FROM event_log");
       this.sql.exec(
         "UPDATE lobby SET status = 'open', paused = 0, play_ms = 0, resumed_at = NULL, action_deadline = NULL WHERE id = 1",
       );
@@ -500,6 +511,7 @@ export class LobbyDO extends DurableObject<Env> {
         JSON.stringify(state),
         now,
       );
+      this.recordEvents(events);
       if (logged) {
         this.sql.exec(
           "INSERT INTO actions (player_id, client_action_id, action_json, at) VALUES (?, ?, ?, ?)",
@@ -648,6 +660,23 @@ export class LobbyDO extends DurableObject<Env> {
       tokenHash,
       now,
     );
+  }
+
+  /** Stores one state change's events as a single row, keeping only recent history. */
+  private recordEvents(events: GameEvent[]): void {
+    if (events.length === 0) return;
+    this.sql.exec("INSERT INTO event_log (events_json) VALUES (?)", JSON.stringify(events));
+    this.sql.exec(
+      "DELETE FROM event_log WHERE seq <= (SELECT MAX(seq) FROM event_log) - ?",
+      EVENT_HISTORY,
+    );
+  }
+
+  private recentEvents(): GameEvent[] {
+    return this.sql
+      .exec<{ events_json: string }>("SELECT events_json FROM event_log ORDER BY seq")
+      .toArray()
+      .flatMap((row) => JSON.parse(row.events_json) as GameEvent[]);
   }
 
   private touch(now: number): void {

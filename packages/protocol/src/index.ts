@@ -3,7 +3,7 @@ import { HERO_IDS, MODES } from "@richual/engine";
 import { z } from "zod";
 
 /** Bumped on any breaking change to the wire format; clients on another version must reload. */
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 
 export const MAX_MESSAGE_BYTES = 16 * 1024;
 export const MAX_PLAYERS = 6;
@@ -228,7 +228,13 @@ export const ClientMessage = z.discriminatedUnion("type", [
 export type ClientMessage = z.infer<typeof ClientMessage>;
 
 export const ServerMessage = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("welcome"), playerId: z.string(), lobby: LobbySnapshot }),
+  z.object({
+    type: z.literal("welcome"),
+    playerId: z.string(),
+    lobby: LobbySnapshot,
+    /** Recent game events, oldest first, so a reconnecting client can rebuild its log. */
+    events: z.array(z.custom<GameEvent>((v) => typeof v === "object")),
+  }),
   z.object({
     type: z.literal("lobby"),
     lobby: LobbySnapshot,

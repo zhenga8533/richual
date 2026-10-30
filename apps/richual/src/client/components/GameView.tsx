@@ -17,6 +17,11 @@ export function GameView({ lobby, game }: { lobby: LobbySnapshot; game: PublicGa
   const { playerId, log } = useConnection();
   const [selected, setSelected] = useState<number | null>(null);
   const [alertsOn, setAlertsOn] = useAlertPreference();
+  const lastDraw = log.findLast((l) => l.event.type === "cardDrawn");
+  const lastCard =
+    lastDraw?.event.type === "cardDrawn"
+      ? { seq: lastDraw.seq, deck: lastDraw.event.deck, cardId: lastDraw.event.cardId }
+      : null;
   // Anything but withdrawing your own offer means the game is waiting on you.
   const needsMe =
     !lobby.paused &&
@@ -32,7 +37,7 @@ export function GameView({ lobby, game }: { lobby: LobbySnapshot; game: PublicGa
   }, [needsMe]);
 
   return (
-    <div className="grid w-full max-w-7xl gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
+    <div className="grid w-full max-w-7xl grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
       <div className="lg:col-span-2">
         <GameBar lobby={lobby} game={game} alertsOn={alertsOn} onAlertsChange={setAlertsOn} />
       </div>
@@ -43,6 +48,7 @@ export function GameView({ lobby, game }: { lobby: LobbySnapshot; game: PublicGa
           myId={playerId}
           selected={selected}
           onSelect={(space) => setSelected(space === selected ? null : space)}
+          lastCard={lastCard}
         />
       </div>
       <aside className="flex min-w-0 flex-col gap-4">
@@ -218,6 +224,8 @@ function EventLog({
   const board = getBoard(game.config.boardId);
   const name = (id: string) => lobby.players.find((p) => p.id === id)?.name ?? "Someone";
   const lines = log
+    // Banishment already says where the player went.
+    .filter((l, i) => !(l.event.type === "moved" && log[i + 1]?.event.type === "sentToJail"))
     .map(({ seq, event }) => ({ seq, text: describeEvent(event, name, board), event }))
     .filter((l): l is typeof l & { text: string } => l.text !== null);
   const end = useRef<HTMLLIElement>(null);

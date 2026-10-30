@@ -1,7 +1,7 @@
 import type { ColorGroup } from "@richual/engine";
 
 /** Token colors by seat. Tokens also show hero initials, so color is never the only cue. */
-export const SEAT_COLORS = ["#e0a43a", "#4f7fd1", "#c94b5b", "#3fa37a", "#9a6ad6", "#e6dcc3"];
+export const SEAT_COLORS = ["#e0a43a", "#6b96e0", "#e0707c", "#4fb88a", "#b08ae6", "#e6dcc3"];
 
 export const seatColor = (seat: number) => SEAT_COLORS[seat % SEAT_COLORS.length] ?? "#ccc";
 
