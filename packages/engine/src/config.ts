@@ -26,6 +26,8 @@ export type RuleConfig = {
   bankruptciesToEnd: number | null;
   /** The game ends, scored by net worth, after this many full rounds. */
   roundLimit: number | null;
+  /** A third die from round 2 on: adds 1–3 to the move, or sends you on to the next unowned property. */
+  speedDie: boolean;
 };
 
 export const CLASSIC_RULES: RuleConfig = {
@@ -43,6 +45,7 @@ export const CLASSIC_RULES: RuleConfig = {
   startingProperties: 0,
   bankruptciesToEnd: null,
   roundLimit: null,
+  speedDie: false,
 };
 
 /**
@@ -57,6 +60,7 @@ export const QUICK_RULES: RuleConfig = {
   guardiansPerWalker: 3,
   startingProperties: 2,
   bankruptciesToEnd: 2,
+  speedDie: true,
 };
 
 export const MODES = { classic: CLASSIC_RULES, quick: QUICK_RULES } as const;

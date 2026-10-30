@@ -2,7 +2,7 @@ import { expect } from "vitest";
 import { DECKS, type DeckId } from "../src/cards";
 import { CLASSIC_RULES, type RuleConfig } from "../src/config";
 import { applyAction, createGame } from "../src/game";
-import type { Action, GameEvent, GameState, PlayerId } from "../src/state";
+import type { Action, GameEvent, GameState, PlayerId, SpeedFace } from "../src/state";
 
 export const IDS = ["a", "b", "c", "d", "e", "f"] as const;
 
@@ -37,6 +37,19 @@ export function apply(
 ): { state: GameState; events: GameEvent[] } {
   const result = applyAction(state, playerId, action, dice ? { dice } : {});
   if (!result.ok) throw new Error(`${action.type} by ${playerId} failed: ${result.error.message}`);
+  return { state: result.state, events: result.events };
+}
+
+/** Rolls `dice` (and a fixed Speed Die face) for the current player. */
+export function rollWithSpeed(
+  state: GameState,
+  dice: readonly [number, number],
+  speed: SpeedFace,
+): { state: GameState; events: GameEvent[] } {
+  const id = state.players[state.turn.playerIndex]?.id;
+  if (!id) throw new Error("no current player");
+  const result = applyAction(state, id, { type: "roll" }, { dice, speed });
+  if (!result.ok) throw new Error(`roll failed: ${result.error.message}`);
   return { state: result.state, events: result.events };
 }
 

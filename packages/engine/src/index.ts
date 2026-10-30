@@ -1,4 +1,5 @@
 export * from "./board";
+export * from "./bot";
 export * from "./cards";
 export * from "./config";
 export * from "./game";

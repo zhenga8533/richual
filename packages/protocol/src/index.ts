@@ -77,6 +77,8 @@ export const LobbySettings = z.object({
   auctions: z.boolean().default(true),
   /** Even building plus the bank's limited Guardian and Walker supply. */
   evenBuilding: z.boolean().default(true),
+  /** A third die from round 2 on; the Quick preset turns it on. */
+  speedDie: z.boolean().default(false),
   mode: z.enum(["classic", "quick"]).default("classic"),
   /** When the game is scored if nobody has won outright. */
   limit: z
@@ -106,6 +108,7 @@ export function rulesFromSettings(settings: LobbySettings): RuleConfig {
     auctions: settings.auctions,
     evenBuilding: settings.evenBuilding,
     limitedBuildings: settings.evenBuilding,
+    speedDie: settings.speedDie,
     roundLimit: settings.limit.kind === "rounds" ? settings.limit.rounds : null,
   };
 }

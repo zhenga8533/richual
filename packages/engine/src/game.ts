@@ -34,6 +34,7 @@ import {
   type GameState,
   type PlayerId,
   type PlayerState,
+  type SpeedFace,
   STATE_SCHEMA_VERSION,
   type Trade,
   type TradeBundle,
@@ -45,7 +46,11 @@ export type NewPlayer = { id: PlayerId; name: string };
 export type ApplyOptions = {
   /** Fixed dice instead of the seeded RNG; for tests and tooling only. */
   dice?: readonly [number, number];
+  /** A fixed Speed Die face, when the Speed Die is in play; for tests only. */
+  speed?: SpeedFace;
 };
+
+const SPEED_FACES: readonly SpeedFace[] = [1, 2, 3, 1, 2, "patron"];
 
 export function createGame(
   players: readonly NewPlayer[],
@@ -102,6 +107,7 @@ export function createGame(
       doublesCount: 0,
       extraRoll: false,
       lastRoll: null,
+      lastSpeed: null,
     },
     phase: { kind: "awaitingRoll" },
     debts: [],
@@ -368,9 +374,12 @@ class Game {
     const dice = this.rollDice();
     const [a, b] = dice;
     const doubles = a === b;
+    // The Speed Die joins from the second round, and never for a roll to leave jail.
+    const speed = config.speedDie && turn.round >= 2 && !p.inJail ? this.rollSpeed() : null;
     turn.lastRoll = dice;
+    turn.lastSpeed = speed;
     turn.extraRoll = false;
-    this.emit({ type: "rolled", playerId: p.id, dice });
+    this.emit({ type: "rolled", playerId: p.id, dice, ...(speed !== null && { speed }) });
 
     if (p.inJail) {
       if (doubles) {
@@ -396,7 +405,42 @@ class Game {
       }
       turn.extraRoll = true;
     }
-    this.moveForward(p, a + b);
+    if (speed === "patron") this.patronMove(p, a + b);
+    else this.moveForward(p, a + b + (speed ?? 0));
+  }
+
+  /**
+   * The Speed Die's Patron (★): after moving, carry on to the next unowned
+   * property, or if none is left the next one where rent is owed, and resolve
+   * only that space. Landing on Banished still banishes.
+   */
+  private patronMove(p: PlayerState, steps: number): void {
+    const size = this.board.spaces.length;
+    const landing = (p.position + steps) % size;
+    if (this.board.spaces[landing]?.kind === "goToJail") {
+      this.moveForward(p, steps);
+      return;
+    }
+    const ahead = Array.from({ length: size }, (_, k) => (landing + k) % size);
+    const ownable = ahead.filter((i) => {
+      const space = this.board.spaces[i];
+      return space !== undefined && isOwnable(space);
+    });
+    const target =
+      ownable.find((i) => this.state.owners[i] === null) ??
+      ownable.find((i) => {
+        const owner = this.state.owners[i];
+        return owner !== null && owner !== p.id && !this.state.sealed[i];
+      }) ??
+      landing;
+    this.moveForward(p, steps + this.forwardDistance(landing, target));
+  }
+
+  private rollSpeed(): SpeedFace {
+    if (this.options.speed !== undefined) return this.options.speed;
+    let index: number;
+    [index, this.state.rng] = nextInt(this.state.rng, 0, SPEED_FACES.length - 1);
+    return SPEED_FACES[index] as SpeedFace;
   }
 
   /**
@@ -449,6 +493,7 @@ class Game {
       doublesCount: 0,
       extraRoll: false,
       lastRoll: turn.lastRoll,
+      lastSpeed: turn.lastSpeed,
     };
     this.state.phase = { kind: "awaitingRoll" };
     this.emit({ type: "turnStarted", playerId: this.current.id });

@@ -44,12 +44,14 @@ const MODE_PRESETS: Record<LobbySettings["mode"], Partial<LobbySettings>> = {
     mode: "classic",
     doubleOnExactGo: true,
     freeParkingJackpot: true,
+    speedDie: false,
     limit: { kind: "none" },
   },
   quick: {
     mode: "quick",
     doubleOnExactGo: false,
     freeParkingJackpot: false,
+    speedDie: true,
     limit: { kind: "rounds", rounds: 20 },
   },
 };
@@ -57,7 +59,7 @@ const MODE_PRESETS: Record<LobbySettings["mode"], Partial<LobbySettings>> = {
 const MODE_NOTES: Record<LobbySettings["mode"], string> = {
   classic: "Play until everyone else is bankrupt.",
   quick:
-    "Two random properties each to start, Walkers after three Guardians, and the game is scored at the second bankruptcy.",
+    "Two random properties each to start, Walkers after three Guardians, the Speed Die, and the game is scored at the second bankruptcy.",
 };
 
 export function Setup({ lobby }: { lobby: LobbySnapshot }) {
@@ -222,6 +224,12 @@ export function Setup({ lobby }: { lobby: LobbySnapshot }) {
             checked={settings.evenBuilding}
             disabled={!isHost}
             onChange={(evenBuilding) => updateSettings({ evenBuilding })}
+          />
+          <Toggle
+            label="Speed Die from round 2: move 1–3 further, or ★ on to the next unowned property"
+            checked={settings.speedDie}
+            disabled={!isHost}
+            onChange={(speedDie) => updateSettings({ speedDie })}
           />
 
           <div className="mt-3">

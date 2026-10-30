@@ -7,6 +7,7 @@ import {
   isOwnable,
   type PublicGameState,
   type Space,
+  type SpeedFace,
   WALKER,
 } from "@richual/engine";
 import type { LobbyPlayer } from "@richual/protocol";
@@ -158,7 +159,7 @@ export function Board({
           <Sunburst />
           <OwnershipBars game={game} ownerOf={ownerOf} highlightOwner={highlightOwner} />
           <p className="relative font-display text-2xl text-accent-text sm:text-5xl">Richual</p>
-          <CardOrDice lastCard={lastCard} roll={game.turn.lastRoll} />
+          <CardOrDice lastCard={lastCard} roll={game.turn.lastRoll} speed={game.turn.lastSpeed} />
           {current && (
             <p className="relative text-xs text-muted sm:text-sm">
               Round {game.turn.round} · <span className="text-fg">{current.name}</span>
@@ -528,9 +529,11 @@ function useSoulFloaters(game: PublicGameState): Floater[] {
 function CardOrDice({
   lastCard,
   roll,
+  speed,
 }: {
   lastCard: ShownCard | null;
   roll: readonly [number, number] | null;
+  speed: SpeedFace | null;
 }) {
   const [dismissed, setDismissed] = useState<number | null>(null);
   const [expired, setExpired] = useState<number | null>(null);
@@ -558,7 +561,7 @@ function CardOrDice({
       </button>
     );
   }
-  return <Dice roll={roll} />;
+  return <Dice roll={roll} speed={speed} />;
 }
 
 const PIPS: Record<number, number[]> = {
@@ -599,15 +602,23 @@ function useTumble(roll: readonly [number, number] | null): readonly [number, nu
   return shown;
 }
 
-function Dice({ roll }: { roll: readonly [number, number] | null }) {
+function Dice({
+  roll,
+  speed,
+}: {
+  roll: readonly [number, number] | null;
+  speed: SpeedFace | null;
+}) {
   const shown = useTumble(roll);
   if (!roll || !shown) return <p className="relative text-sm text-muted">No dice rolled yet</p>;
+  const speedLabel =
+    speed === null ? "" : speed === "patron" ? " and a Patron star" : ` and ${speed}`;
   return (
     <div
       key={roll.join("-")}
-      className="dice-roll relative flex gap-2"
+      className="dice-roll relative flex items-center gap-2"
       role="img"
-      aria-label={`Last roll ${roll[0]} and ${roll[1]}`}
+      aria-label={`Last roll ${roll[0]} and ${roll[1]}${speedLabel}`}
     >
       {shown.map((value, i) => (
         <div
@@ -624,6 +635,14 @@ function Dice({ roll }: { roll: readonly [number, number] | null }) {
           ))}
         </div>
       ))}
+      {speed !== null && (
+        <div
+          className="grid size-7 place-items-center rounded-lg bg-accent font-bold text-accent-fg shadow-md ring-1 ring-black/10 sm:size-10 sm:text-lg"
+          title="Speed Die"
+        >
+          {speed === "patron" ? "★" : speed}
+        </div>
+      )}
     </div>
   );
 }

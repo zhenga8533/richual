@@ -2,9 +2,12 @@ import type { DeckId } from "./cards";
 import type { RuleConfig } from "./config";
 import type { RngState } from "./rng";
 
-export const STATE_SCHEMA_VERSION = 3;
+export const STATE_SCHEMA_VERSION = 4;
 
 export type PlayerId = string;
+
+/** A Speed Die face: a number to add to the move, or the Patron (★). */
+export type SpeedFace = 1 | 2 | 3 | "patron";
 
 export type PlayerState = {
   id: PlayerId;
@@ -71,6 +74,8 @@ export type TurnState = {
   /** Whether the current roll entitles the player to roll again once it resolves. */
   extraRoll: boolean;
   lastRoll: readonly [number, number] | null;
+  /** The Speed Die from the last roll, when it was in play. */
+  lastSpeed: SpeedFace | null;
 };
 
 export type DeckState = {
@@ -179,7 +184,7 @@ export type Action =
 export type ActionType = Action["type"];
 
 export type GameEvent =
-  | { type: "rolled"; playerId: PlayerId; dice: readonly [number, number] }
+  | { type: "rolled"; playerId: PlayerId; dice: readonly [number, number]; speed?: SpeedFace }
   | { type: "moved"; playerId: PlayerId; from: number; to: number }
   | { type: "transfer"; from: Account; to: Account; amount: number; reason: TransferReason }
   | { type: "bought"; playerId: PlayerId; space: number; price: number }

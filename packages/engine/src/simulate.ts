@@ -1,4 +1,5 @@
 import { getBoard, isOwnable } from "./board";
+import { botAction } from "./bot";
 import type { RuleConfig } from "./config";
 import { applyAction, applyTimeout, createGame, type NewPlayer } from "./game";
 import { checkAction, getLegalActions } from "./legal";
@@ -97,6 +98,13 @@ export const randomPolicy: Policy = (state, playerId, legal, rng) => {
   );
   if (flow.length > 0) return pick(flow, rng);
   return pick(legal, rng);
+};
+
+/** Plays exactly as a Richual bot would. */
+export const botPolicy: Policy = (state, playerId, legal, rng) => {
+  const action = botAction(state, playerId) ?? legal[0];
+  if (!action) throw new Error("bot policy called with no legal actions");
+  return [action, rng];
 };
 
 /** Players who have something to decide, ignoring offers they could merely withdraw. */

@@ -22,6 +22,14 @@ arrive. If you know the classic property-trading game, you already know most of 
 
 Passing the **Astral Gate** pays 200 ◈ (double for landing exactly on it, if that rule is on).
 
+### The Speed Die (optional, on in Quick)
+
+From round 2, a third die is rolled with the two normal dice. Its faces are 1, 2, 3, 1, 2 and ★.
+A number adds to your move. On ★ you move by the normal dice, then carry straight on to the next
+unowned property (or, once everything is owned, the next space where you'd pay rent), and only that
+space takes effect. Landing on Banished still banishes you. Doubles count only the normal dice, and
+the Speed Die isn't rolled to leave the Lost Whisper.
+
 ## Rent
 
 | Space          | Rent                                                                  |

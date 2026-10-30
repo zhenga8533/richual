@@ -5,7 +5,14 @@ import { DECKS, type DeckId } from "../src/cards";
 import { CLASSIC_RULES, QUICK_RULES, type RuleConfig } from "../src/config";
 import { getLegalActions } from "../src/legal";
 import { activePlayers, buildingsInUse, currentPlayer, tradeProblem } from "../src/rules";
-import { replay, type SimulationStep, simulateGame } from "../src/simulate";
+import {
+  botPolicy,
+  type Policy,
+  randomPolicy,
+  replay,
+  type SimulationStep,
+  simulateGame,
+} from "../src/simulate";
 import { IDS, totalCash } from "./helpers";
 
 function check(condition: boolean, message: string): asserts condition {
@@ -192,6 +199,49 @@ describe("simulation", () => {
       { numRuns: 20 },
     );
   }, 60_000);
+
+  it("keeps every invariant when bots play, alone or against random players", () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 0, max: 0xffffffff }),
+        fc.integer({ min: 2, max: 6 }),
+        fc.boolean(),
+        fc.constantFrom(CLASSIC_RULES, QUICK_RULES),
+        (seed, n, mixed, rules) => {
+          // In mixed games only the first two seats are bots.
+          const policy: Policy = (state, playerId, legal, rng) =>
+            !mixed || playerId === "a" || playerId === "b"
+              ? botPolicy(state, playerId, legal, rng)
+              : randomPolicy(state, playerId, legal, rng);
+          simulateGame({
+            players: players(n),
+            rules,
+            seed,
+            maxTurns: 300,
+            policy,
+            timeoutChance: 0.05,
+            onStep: checkInvariants,
+          });
+        },
+      ),
+      { numRuns: 40 },
+    );
+  }, 120_000);
+
+  it("always finishes all-bot games", () => {
+    for (let seed = 0; seed < 12; seed++) {
+      for (const rules of [CLASSIC_RULES, QUICK_RULES]) {
+        const result = simulateGame({
+          players: players(4),
+          rules,
+          seed,
+          maxTurns: 2000,
+          policy: botPolicy,
+        });
+        expect(result.finished, `seed ${seed}`).toBe(true);
+      }
+    }
+  }, 120_000);
 
   describe("length report", () => {
     const rows: Record<string, string | number>[] = [];
