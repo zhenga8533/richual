@@ -1,79 +1,148 @@
 @import "tailwindcss";
 
-@theme {
+/* Theme tokens. Components use only these semantic names, so both themes stay consistent. */
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #100e0c;
+  --surface: #181512;
+  --surface-2: #201c18;
+  --surface-3: #2a251f;
+  --line: rgb(236 226 200 / 0.08);
+  --line-strong: rgb(236 226 200 / 0.16);
+  --fg: #ece2c8;
+  --muted: #a99f88;
+  --accent: #c9a54a;
+  --accent-hover: #d8b55a;
+  --accent-fg: #14110d;
+  --accent-text: #d9b45a;
+  --accent-soft: rgb(201 165 74 / 0.14);
+  --danger: #e57361;
+  --danger-fg: #14110d;
+  --danger-soft: rgb(229 115 97 / 0.14);
+  --ring: #e0a43a;
+  --board: #0b0a08;
+  --cell: #1b1814;
+  --cell-hover: #25211c;
+  --shadow-color: 0 0 0;
+  --shadow-strength: 0.45;
+  --backdrop: radial-gradient(ellipse at top, #1f1a14 0%, #100e0c 65%);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --bg: #f4efe3;
+    --surface: #fbf8f1;
+    --surface-2: #efe8d8;
+    --surface-3: #e6dcc7;
+    --line: rgb(42 32 20 / 0.1);
+    --line-strong: rgb(42 32 20 / 0.18);
+    --fg: #1c1712;
+    --muted: #645845;
+    --accent: #77591a;
+    --accent-hover: #8a6a1f;
+    --accent-fg: #fffaf0;
+    --accent-text: #6f5214;
+    --accent-soft: rgb(138 106 31 / 0.12);
+    --danger: #a8352a;
+    --danger-fg: #fffaf0;
+    --danger-soft: rgb(168 53 42 / 0.1);
+    --ring: #a8741a;
+    --board: #d9ccb1;
+    --cell: #fbf8f1;
+    --cell-hover: #f3ecdd;
+    --shadow-color: 60 42 18;
+    --shadow-strength: 0.14;
+    --backdrop: radial-gradient(ellipse at top, #fbf7ee 0%, #f4efe3 65%);
+  }
+}
+
+/* Duplicated from the media query above because CSS cannot share a rule between them. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f4efe3;
+  --surface: #fbf8f1;
+  --surface-2: #efe8d8;
+  --surface-3: #e6dcc7;
+  --line: rgb(42 32 20 / 0.1);
+  --line-strong: rgb(42 32 20 / 0.18);
+  --fg: #1c1712;
+  --muted: #645845;
+  --accent: #77591a;
+  --accent-hover: #8a6a1f;
+  --accent-fg: #fffaf0;
+  --accent-text: #6f5214;
+  --accent-soft: rgb(138 106 31 / 0.12);
+  --danger: #a8352a;
+  --danger-fg: #fffaf0;
+  --danger-soft: rgb(168 53 42 / 0.1);
+  --ring: #a8741a;
+  --board: #d9ccb1;
+  --cell: #fbf8f1;
+  --cell-hover: #f3ecdd;
+  --shadow-color: 60 42 18;
+  --shadow-strength: 0.14;
+  --backdrop: radial-gradient(ellipse at top, #fbf7ee 0%, #f4efe3 65%);
+}
+
+@theme inline {
   --font-display: "Limelight", Georgia, serif;
   --font-sans: "IBM Plex Sans", system-ui, sans-serif;
 
-  --color-ink: #0f0d0b;
-  --color-smoke: #1b1814;
-  --color-smoke-light: #2a251f;
-  --color-brass: #c9a54a;
-  --color-brass-dim: #8a7234;
-  --color-parchment: #ece2c8;
-  --color-parchment-dim: #b8ad94;
-  --color-amber: #e0a43a;
-  --color-sapphire: #4f7fd1;
-  --color-blood: #e57361;
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-text: var(--accent-text);
+  --color-accent-soft: var(--accent-soft);
+  --color-danger: var(--danger);
+  --color-danger-fg: var(--danger-fg);
+  --color-danger-soft: var(--danger-soft);
+  --color-ring: var(--ring);
+  --color-board: var(--board);
+  --color-cell: var(--cell);
+  --color-cell-hover: var(--cell-hover);
+  /* Fixed colours used only as fills behind dark text, the same in both themes. */
+  --color-ink: #14110d;
+
+  --shadow-card:
+    0 1px 2px rgb(var(--shadow-color) / calc(var(--shadow-strength) * 0.8)),
+    0 8px 24px -8px rgb(var(--shadow-color) / var(--shadow-strength));
+  --shadow-pop:
+    0 2px 4px rgb(var(--shadow-color) / var(--shadow-strength)),
+    0 16px 40px -8px rgb(var(--shadow-color) / calc(var(--shadow-strength) * 1.4));
 }
 
 @layer base {
-  html {
-    color-scheme: dark;
-  }
-
   body {
-    @apply min-h-dvh bg-ink font-sans text-parchment antialiased;
-    background-image: radial-gradient(ellipse at top, #241f18 0%, var(--color-ink) 70%);
+    @apply min-h-dvh bg-bg font-sans text-fg antialiased;
+    background-image: var(--backdrop);
   }
 
   :focus-visible {
-    @apply outline-2 outline-offset-2 outline-amber;
+    @apply outline-2 outline-offset-2 outline-ring;
+  }
+
+  ::selection {
+    background: var(--accent-soft);
   }
 }
 
-@utility panel {
-  @apply rounded-sm border border-brass-dim/60 bg-smoke/90 shadow-lg shadow-black/40;
-}
-
-@utility btn {
-  @apply inline-flex items-center justify-center gap-2 rounded-sm border px-4 py-2 font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50;
-}
-
-@utility btn-primary {
-  @apply btn border-brass bg-brass text-ink hover:bg-amber;
-}
-
-@utility btn-ghost {
-  @apply btn border-brass-dim text-parchment hover:border-brass hover:bg-smoke-light;
-}
-
-@utility input {
-  @apply w-full rounded-sm border border-brass-dim bg-ink px-3 py-2 text-parchment placeholder:text-parchment-dim/60 focus:border-brass;
-}
-
-/* !important is the point here: reduced motion must win over every component's transitions. */
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    /* biome-ignore lint/complexity/noImportantStyles: must override all component styles */
-    animation-duration: 0.01ms !important;
-    /* biome-ignore lint/complexity/noImportantStyles: must override all component styles */
-    transition-duration: 0.01ms !important;
-  }
-}
-
-/* A double brass rule with stepped deco corners around the board. */
-.deco-frame {
-  background:
-    linear-gradient(var(--color-ink), var(--color-ink)) padding-box,
-    linear-gradient(135deg, var(--color-brass), var(--color-brass-dim) 40%, var(--color-brass))
-    border-box;
-  border: 2px solid transparent;
+/* Board frame: one fine brass rule with a soft outer glow; quiet enough for both themes. */
+.board-frame {
+  border: 1px solid color-mix(in oklab, var(--accent) 55%, transparent);
   box-shadow:
-    0 0 0 4px var(--color-ink),
-    0 0 0 5px var(--color-brass-dim),
-    0 12px 40px rgb(0 0 0 / 0.6);
+    0 0 0 4px var(--bg),
+    0 0 0 5px color-mix(in oklab, var(--accent) 30%, transparent),
+    var(--shadow-pop);
 }
 
 @keyframes card-reveal {
@@ -105,4 +174,66 @@
 
 .dice-roll {
   animation: dice-roll 280ms ease-out;
+}
+
+/* !important is the point here: reduced motion must win over every component's transitions. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    /* biome-ignore lint/complexity/noImportantStyles: must override all component styles */
+    animation-duration: 0.01ms !important;
+    /* biome-ignore lint/complexity/noImportantStyles: must override all component styles */
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* A sweep of the new owner's colour across a just-bought space. */
+@keyframes buy-flash {
+  from {
+    box-shadow: inset 0 0 0 999px color-mix(in oklab, var(--flash) 70%, transparent);
+  }
+  to {
+    box-shadow: inset 0 0 0 999px transparent;
+  }
+}
+
+.buy-flash {
+  animation: buy-flash 850ms ease-out;
+}
+
+/* Soul changes rise from a token and fade. */
+@keyframes soul-float {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -60%);
+  }
+  15% {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, -260%);
+  }
+}
+
+.soul-float {
+  animation: soul-float 1.25s ease-out forwards;
+}
+
+/* Draws the eye to the action card when the game starts waiting on you. */
+@keyframes attention {
+  0%,
+  100% {
+    box-shadow: var(--shadow-card);
+  }
+  40% {
+    box-shadow:
+      0 0 0 3px color-mix(in oklab, var(--accent) 60%, transparent),
+      var(--shadow-card);
+  }
+}
+
+.attention {
+  animation: attention 900ms ease-in-out 2;
 }

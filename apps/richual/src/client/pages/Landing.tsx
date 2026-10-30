@@ -3,6 +3,10 @@ import { type FormEvent, useState } from "react";
 import { createLobby } from "../api";
 import { lobbyPath, navigate } from "../router";
 import { loadName, saveName, saveSession } from "../session";
+import { Button } from "../ui/button";
+import { Card } from "../ui/card";
+import { Input, Label } from "../ui/field";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/radix";
 
 export function Landing() {
   const [name, setName] = useState(loadName);
@@ -37,53 +41,64 @@ export function Landing() {
   };
 
   return (
-    <div className="flex w-full max-w-md flex-col gap-8">
+    <div className="flex w-full max-w-sm flex-1 flex-col justify-center gap-8 py-8">
       <header className="text-center">
-        <h1 className="font-display text-6xl tracking-wide text-brass">Richual</h1>
-        <p className="mt-2 text-parchment-dim">
+        <h1 className="font-display text-6xl text-accent-text">Richual</h1>
+        <p className="mt-3 text-muted">
           Trade souls across the Cursed Apple while the Patrons wait.
         </p>
       </header>
 
-      <form onSubmit={onCreate} className="panel flex flex-col gap-3 p-5">
-        <h2 className="font-display text-xl text-parchment">Begin a ritual</h2>
-        <label className="flex flex-col gap-1 text-sm">
-          Your name
-          <input
-            className="input"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            maxLength={20}
-            required
-            autoComplete="nickname"
-          />
-        </label>
-        <button type="submit" className="btn-primary" disabled={busy || !name.trim()}>
-          {busy ? "Summoning…" : "Create lobby"}
-        </button>
-      </form>
+      <Card className="p-2">
+        <Tabs defaultValue="create" onValueChange={() => setError(null)}>
+          <TabsList>
+            <TabsTrigger value="create">New game</TabsTrigger>
+            <TabsTrigger value="join">Join a game</TabsTrigger>
+          </TabsList>
 
-      <form onSubmit={onJoin} className="panel flex flex-col gap-3 p-5">
-        <h2 className="font-display text-xl text-parchment">Join with a code</h2>
-        <label className="flex flex-col gap-1 text-sm">
-          Invite code
-          <input
-            className="input font-mono uppercase tracking-[0.3em]"
-            value={code}
-            onChange={(e) => setCode(e.target.value)}
-            maxLength={6}
-            required
-            autoComplete="off"
-            spellCheck={false}
-          />
-        </label>
-        <button type="submit" className="btn-ghost" disabled={!code.trim()}>
-          Join lobby
-        </button>
-      </form>
+          <TabsContent value="create">
+            <form onSubmit={onCreate} className="flex flex-col gap-4 p-3 pt-5">
+              <Label>
+                Your name
+                <Input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  maxLength={20}
+                  required
+                  autoComplete="nickname"
+                />
+              </Label>
+              <Button type="submit" variant="primary" size="lg" disabled={busy || !name.trim()}>
+                {busy ? "Summoning…" : "Create lobby"}
+              </Button>
+            </form>
+          </TabsContent>
+
+          <TabsContent value="join">
+            <form onSubmit={onJoin} className="flex flex-col gap-4 p-3 pt-5">
+              <Label>
+                Invite code
+                <Input
+                  className="font-mono text-base tracking-[0.3em] uppercase"
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                  maxLength={6}
+                  required
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder="ABC123"
+                />
+              </Label>
+              <Button type="submit" variant="primary" size="lg" disabled={!code.trim()}>
+                Join lobby
+              </Button>
+            </form>
+          </TabsContent>
+        </Tabs>
+      </Card>
 
       {error && (
-        <p role="alert" className="text-center text-sm text-blood">
+        <p role="alert" className="text-center text-sm text-danger">
           {error}
         </p>
       )}

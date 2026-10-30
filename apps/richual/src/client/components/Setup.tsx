@@ -5,10 +5,17 @@ import {
   MAX_PLAYERS,
   TURN_TIMER_OPTIONS,
 } from "@richual/protocol";
+import type { ReactNode } from "react";
 import { send, useConnection } from "../connection";
-import { initials, SOULS, seatColor } from "../theme";
+import { SOULS } from "../theme";
+import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
+import { Select } from "../ui/field";
+import { Switch } from "../ui/radix";
 import { ChatPanel } from "./ChatPanel";
 import { heroLabel } from "./heroLabel";
+import { PlayerAvatar } from "./PlayerAvatar";
 
 const STARTING_CASH_OPTIONS = [1000, 1500, 2000, 2500];
 
@@ -58,184 +65,198 @@ export function Setup({ lobby }: { lobby: LobbySnapshot }) {
   const isHost = playerId === lobby.hostId;
   const me = lobby.players.find((p) => p.id === playerId);
   const takenByOthers = new Set(lobby.players.filter((p) => p.id !== playerId).map((p) => p.hero));
+  const { settings } = lobby;
 
   const updateSettings = (patch: Partial<LobbySettings>) =>
-    send({ type: "updateSettings", settings: { ...lobby.settings, ...patch } });
+    send({ type: "updateSettings", settings: { ...settings, ...patch } });
 
   return (
-    <div className="flex w-full flex-col gap-4">
-      <section className="panel p-5" aria-labelledby="players-heading">
-        <h2 id="players-heading" className="mb-3 font-display text-xl">
-          Players ({lobby.players.length}/{MAX_PLAYERS})
-        </h2>
-        <ul className="flex flex-col gap-2">
-          {lobby.players.map((p) => (
-            <li key={p.id} className="flex items-center gap-3">
-              <span
-                className="grid size-8 shrink-0 place-items-center rounded-full text-xs font-semibold text-ink"
-                style={{ background: seatColor(p.seat) }}
-                aria-hidden
+    <div className="grid w-full gap-4 lg:grid-cols-[minmax(0,1fr)_24rem]">
+      <div className="flex min-w-0 flex-col gap-4">
+        <Card aria-labelledby="players-heading">
+          <CardHeader>
+            <CardTitle id="players-heading">
+              Players ({lobby.players.length}/{MAX_PLAYERS})
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ul className="flex flex-col gap-1">
+              {lobby.players.map((p) => (
+                <li key={p.id} className="flex items-center gap-3 rounded-lg px-2 py-2">
+                  <PlayerAvatar seat={p.seat} hero={p.hero} name={p.name} online={p.connected} />
+                  <div className="min-w-0 flex-1">
+                    <p className="flex items-center gap-2 truncate font-medium">
+                      {p.name}
+                      {p.id === playerId && <Badge>You</Badge>}
+                      {p.id === lobby.hostId && <Badge variant="accent">Host</Badge>}
+                    </p>
+                    <p className="text-xs text-muted">{p.connected ? "Online" : "Offline"}</p>
+                  </div>
+                  {p.id === playerId ? (
+                    <label className="text-sm">
+                      <span className="sr-only">Your hero</span>
+                      <Select
+                        value={me?.hero ?? ""}
+                        onChange={(e) => send({ type: "setHero", hero: e.target.value as HeroId })}
+                      >
+                        {!me?.hero && (
+                          <option value="" disabled>
+                            Choose a hero
+                          </option>
+                        )}
+                        {HEROES.map((h) => (
+                          <option key={h.id} value={h.id} disabled={takenByOthers.has(h.id)}>
+                            {h.name}
+                          </option>
+                        ))}
+                      </Select>
+                    </label>
+                  ) : (
+                    <span className="text-sm text-muted">{heroLabel(p.hero, "No hero")}</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+        <ChatPanel lobby={lobby} />
+      </div>
+
+      <Card aria-labelledby="settings-heading" className="h-fit">
+        <CardHeader>
+          <CardTitle id="settings-heading">Rules</CardTitle>
+          {!isHost && <span className="text-xs text-muted">Set by the host</span>}
+        </CardHeader>
+        <CardContent className="flex flex-col gap-1">
+          <Row label="Mode" hint={MODE_NOTES[settings.mode]}>
+            <Select
+              value={settings.mode}
+              disabled={!isHost}
+              onChange={(e) =>
+                updateSettings(MODE_PRESETS[e.target.value as LobbySettings["mode"]])
+              }
+            >
+              <option value="classic">Classic</option>
+              <option value="quick">Quick</option>
+            </Select>
+          </Row>
+          <Row
+            label="Game length"
+            hint={
+              settings.limit.kind === "none"
+                ? undefined
+                : "The round in progress finishes, then the richest player wins. Pauses don't count."
+            }
+          >
+            <Select
+              value={limitKey(settings.limit)}
+              disabled={!isHost}
+              onChange={(e) => {
+                const option = LIMIT_OPTIONS.find((o) => limitKey(o.limit) === e.target.value);
+                if (option) updateSettings({ limit: option.limit });
+              }}
+            >
+              {LIMIT_OPTIONS.map((o) => (
+                <option key={limitKey(o.limit)} value={limitKey(o.limit)}>
+                  {o.label}
+                </option>
+              ))}
+            </Select>
+          </Row>
+          <Row
+            label="Turn timer"
+            hint={
+              settings.turnTimerSeconds > 0
+                ? "Idle players are auto-played safely. Never trades."
+                : undefined
+            }
+          >
+            <Select
+              value={settings.turnTimerSeconds}
+              disabled={!isHost}
+              onChange={(e) => updateSettings({ turnTimerSeconds: Number(e.target.value) })}
+            >
+              {TURN_TIMER_OPTIONS.map((sec) => (
+                <option key={sec} value={sec}>
+                  {sec === 0 ? "Off" : `${sec} seconds`}
+                </option>
+              ))}
+            </Select>
+          </Row>
+          <Row label="Starting souls">
+            <Select
+              value={settings.startingCash}
+              disabled={!isHost}
+              onChange={(e) => updateSettings({ startingCash: Number(e.target.value) })}
+            >
+              {STARTING_CASH_OPTIONS.map((v) => (
+                <option key={v} value={v}>
+                  {v} {SOULS}
+                </option>
+              ))}
+            </Select>
+          </Row>
+
+          <div className="my-2 border-t border-line" />
+
+          <Toggle
+            label="Double salary for landing exactly on the Astral Gate"
+            checked={settings.doubleOnExactGo}
+            disabled={!isHost}
+            onChange={(doubleOnExactGo) => updateSettings({ doubleOnExactGo })}
+          />
+          <Toggle
+            label="Taxes and fines fill the Soul Urn jackpot"
+            checked={settings.freeParkingJackpot}
+            disabled={!isHost}
+            onChange={(freeParkingJackpot) => updateSettings({ freeParkingJackpot })}
+          />
+          <Toggle
+            label="Auction properties nobody buys"
+            checked={settings.auctions}
+            disabled={!isHost}
+            onChange={(auctions) => updateSettings({ auctions })}
+          />
+          <Toggle
+            label="Build evenly, from a limited supply of Guardians and Walkers"
+            checked={settings.evenBuilding}
+            disabled={!isHost}
+            onChange={(evenBuilding) => updateSettings({ evenBuilding })}
+          />
+
+          <div className="mt-3">
+            {isHost ? (
+              <Button
+                variant="primary"
+                size="lg"
+                className="w-full"
+                disabled={lobby.players.length < 2}
+                onClick={() => send({ type: "startGame" })}
               >
-                {initials(heroLabel(p.hero, p.name))}
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className={p.id === playerId ? "font-semibold" : ""}>{p.name}</span>
-                {p.id === playerId && <span className="text-parchment-dim"> (you)</span>}
-                {p.id === lobby.hostId && (
-                  <span className="ml-2 rounded-sm border border-brass-dim px-1.5 text-xs text-brass">
-                    Host
-                  </span>
-                )}
-                <span className="block text-xs text-parchment-dim">
-                  {p.connected ? "online" : "offline"}
-                </span>
-              </span>
-              {p.id === playerId ? (
-                <label className="text-sm">
-                  <span className="sr-only">Your hero</span>
-                  <select
-                    className="input py-1"
-                    value={me?.hero ?? ""}
-                    onChange={(e) => send({ type: "setHero", hero: e.target.value as HeroId })}
-                  >
-                    {!me?.hero && (
-                      <option value="" disabled>
-                        Choose a hero
-                      </option>
-                    )}
-                    {HEROES.map((h) => (
-                      <option key={h.id} value={h.id} disabled={takenByOthers.has(h.id)}>
-                        {h.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ) : (
-                <span className="text-sm text-parchment-dim">{heroLabel(p.hero, "No hero")}</span>
-              )}
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      <section className="panel flex flex-col gap-3 p-5" aria-labelledby="settings-heading">
-        <h2 id="settings-heading" className="font-display text-xl">
-          Rules
-        </h2>
-        <label className="flex items-center justify-between gap-3 text-sm">
-          Mode
-          <select
-            className="input w-auto py-1"
-            value={lobby.settings.mode}
-            disabled={!isHost}
-            onChange={(e) => updateSettings(MODE_PRESETS[e.target.value as LobbySettings["mode"]])}
-          >
-            <option value="classic">Classic</option>
-            <option value="quick">Quick</option>
-          </select>
-        </label>
-        <p className="-mt-1 text-xs text-parchment-dim">{MODE_NOTES[lobby.settings.mode]}</p>
-        <label className="flex items-center justify-between gap-3 text-sm">
-          Game length
-          <select
-            className="input w-auto py-1"
-            value={limitKey(lobby.settings.limit)}
-            disabled={!isHost}
-            onChange={(e) => {
-              const option = LIMIT_OPTIONS.find((o) => limitKey(o.limit) === e.target.value);
-              if (option) updateSettings({ limit: option.limit });
-            }}
-          >
-            {LIMIT_OPTIONS.map((o) => (
-              <option key={limitKey(o.limit)} value={limitKey(o.limit)}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        {lobby.settings.limit.kind !== "none" && (
-          <p className="-mt-1 text-xs text-parchment-dim">
-            When the limit is reached the current round finishes, then the richest player wins.
-            Paused time does not count.
-          </p>
-        )}
-        <label className="flex items-center justify-between gap-3 text-sm">
-          Turn timer
-          <select
-            className="input w-auto py-1"
-            value={lobby.settings.turnTimerSeconds}
-            disabled={!isHost}
-            onChange={(e) => updateSettings({ turnTimerSeconds: Number(e.target.value) })}
-          >
-            {TURN_TIMER_OPTIONS.map((sec) => (
-              <option key={sec} value={sec}>
-                {sec === 0 ? "Off" : `${sec} seconds`}
-              </option>
-            ))}
-          </select>
-        </label>
-        {lobby.settings.turnTimerSeconds > 0 && (
-          <p className="-mt-1 text-xs text-parchment-dim">
-            Idle players are auto-played safely: roll, pass, end turn, and raise owed souls. Never
-            trades.
-          </p>
-        )}
-        <label className="flex items-center justify-between gap-3 text-sm">
-          Starting souls
-          <select
-            className="input w-auto py-1"
-            value={lobby.settings.startingCash}
-            disabled={!isHost}
-            onChange={(e) => updateSettings({ startingCash: Number(e.target.value) })}
-          >
-            {STARTING_CASH_OPTIONS.map((v) => (
-              <option key={v} value={v}>
-                {v} {SOULS}
-              </option>
-            ))}
-          </select>
-        </label>
-        <Toggle
-          label="Double salary for landing exactly on the Astral Gate"
-          checked={lobby.settings.doubleOnExactGo}
-          disabled={!isHost}
-          onChange={(doubleOnExactGo) => updateSettings({ doubleOnExactGo })}
-        />
-        <Toggle
-          label="Taxes and fines fill the Soul Urn jackpot"
-          checked={lobby.settings.freeParkingJackpot}
-          disabled={!isHost}
-          onChange={(freeParkingJackpot) => updateSettings({ freeParkingJackpot })}
-        />
-        <Toggle
-          label="Auction properties nobody buys"
-          checked={lobby.settings.auctions}
-          disabled={!isHost}
-          onChange={(auctions) => updateSettings({ auctions })}
-        />
-        <Toggle
-          label="Build evenly, from a limited supply of Guardians and Walkers"
-          checked={lobby.settings.evenBuilding}
-          disabled={!isHost}
-          onChange={(evenBuilding) => updateSettings({ evenBuilding })}
-        />
-        {!isHost && <p className="text-xs text-parchment-dim">Only the host can change rules.</p>}
-      </section>
-
-      {isHost ? (
-        <button
-          type="button"
-          className="btn-primary self-start"
-          disabled={lobby.players.length < 2}
-          onClick={() => send({ type: "startGame" })}
-        >
-          {lobby.players.length < 2 ? "Waiting for another player…" : "Begin the ritual"}
-        </button>
-      ) : (
-        <p className="text-sm text-parchment-dim">Waiting for the host to start the game…</p>
-      )}
-      <ChatPanel lobby={lobby} />
+                {lobby.players.length < 2 ? "Waiting for another player…" : "Begin the ritual"}
+              </Button>
+            ) : (
+              <p className="rounded-lg bg-surface-2 px-3 py-2.5 text-center text-sm text-muted">
+                Waiting for the host to start the game…
+              </p>
+            )}
+          </div>
+        </CardContent>
+      </Card>
     </div>
+  );
+}
+
+function Row({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+  return (
+    // biome-ignore lint/a11y/noLabelWithoutControl: the control is passed as children
+    <label className="flex flex-col gap-1 py-1.5">
+      <span className="flex items-center justify-between gap-3 text-sm">
+        {label}
+        {children}
+      </span>
+      {hint && <span className="text-xs text-muted">{hint}</span>}
+    </label>
   );
 }
 
@@ -251,15 +272,9 @@ function Toggle({
   onChange: (value: boolean) => void;
 }) {
   return (
-    <label className="flex items-center justify-between gap-3 text-sm">
+    <label className="flex items-center justify-between gap-4 py-1.5 text-sm">
       {label}
-      <input
-        type="checkbox"
-        className="size-4 accent-amber"
-        checked={checked}
-        disabled={disabled}
-        onChange={(e) => onChange(e.target.checked)}
-      />
+      <Switch checked={checked} disabled={disabled} onCheckedChange={onChange} />
     </label>
   );
 }

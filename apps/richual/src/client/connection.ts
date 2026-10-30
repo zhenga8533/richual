@@ -10,6 +10,7 @@ import {
 } from "@richual/protocol";
 import { create } from "zustand";
 import { clearSession } from "./session";
+import { pushToast } from "./toasts";
 
 export type ConnectionStatus =
   | "connecting"
@@ -26,8 +27,8 @@ type ConnectionState = {
   lobby: LobbySnapshot | null;
   /** Fatal connection problem, shown in place of the lobby. */
   error: string | null;
-  /** Transient message about a refused request. */
-  notice: string | null;
+  /** Events up to this sequence number are history replayed on connect, not news. */
+  historySeq: number;
   log: LoggedEvent[];
   /** Id of the action awaiting acknowledgement; further actions wait for it. */
   pendingActionId: string | null;
@@ -40,7 +41,7 @@ export const useConnection = create<ConnectionState>(() => ({
   playerId: null,
   lobby: null,
   error: null,
-  notice: null,
+  historySeq: 0,
   log: [],
   pendingActionId: null,
   clockOffset: 0,
@@ -52,7 +53,6 @@ export const serverNow = () => Date.now() + useConnection.getState().clockOffset
 const KEEPALIVE_MS = 30_000;
 const MAX_BACKOFF_MS = 10_000;
 const MAX_LOG = 200;
-const NOTICE_MS = 4_000;
 
 const TERMINAL_CLOSES: Record<number, string> = {
   [CloseCode.Unauthorized]: "Your session for this lobby is no longer valid.",
@@ -63,18 +63,11 @@ const TERMINAL_CLOSES: Record<number, string> = {
 
 let activeSocket: WebSocket | null = null;
 let logSeq = 0;
-let noticeTimer: ReturnType<typeof setTimeout> | undefined;
-
-function showNotice(message: string): void {
-  clearTimeout(noticeTimer);
-  useConnection.setState({ notice: message });
-  noticeTimer = setTimeout(() => useConnection.setState({ notice: null }), NOTICE_MS);
-}
 
 /** Sends a message if connected. Returns false when there is no open connection. */
 export function send(message: ClientMessage): boolean {
   if (activeSocket?.readyState !== WebSocket.OPEN) {
-    showNotice("Not connected. Reconnecting…");
+    pushToast("Not connected. Reconnecting…", "error");
     return false;
   }
   activeSocket.send(JSON.stringify(message));
@@ -105,6 +98,8 @@ function handleMessage(msg: ServerMessage): void {
         lobby: msg.lobby,
         // The server's recent history replaces whatever this tab had, so a reload loses nothing.
         log: msg.events.map((event) => ({ seq: ++logSeq, event })).slice(-MAX_LOG),
+        // Evaluated after `log` above has numbered the replayed events.
+        historySeq: logSeq,
         clockOffset: msg.lobby.serverNow - Date.now(),
         error: null,
         // Anything in flight before a reconnect is reflected in this snapshot.
@@ -128,7 +123,7 @@ function handleMessage(msg: ServerMessage): void {
         useConnection.setState({ pendingActionId: null });
       }
       // A stale action is resolved by the snapshot that follows; nothing for the player to do.
-      if (msg.error !== "stale") showNotice(msg.message);
+      if (msg.error !== "stale") pushToast(msg.message, "error");
       break;
     case "pong":
       break;
@@ -151,7 +146,7 @@ export function connect(session: SessionResponse): () => void {
     playerId: null,
     lobby: null,
     error: null,
-    notice: null,
+    historySeq: logSeq,
     log: [],
     pendingActionId: null,
   });
