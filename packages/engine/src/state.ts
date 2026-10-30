@@ -2,7 +2,7 @@ import type { DeckId } from "./cards";
 import type { RuleConfig } from "./config";
 import type { RngState } from "./rng";
 
-export const STATE_SCHEMA_VERSION = 2;
+export const STATE_SCHEMA_VERSION = 3;
 
 export type PlayerId = string;
 
@@ -33,13 +33,39 @@ export type Phase =
     }
   /** Someone owes more than they hold; see `debts`. */
   | { kind: "raisingFunds" }
-  | { kind: "gameOver"; winnerId: PlayerId };
+  | { kind: "gameOver"; winnerId: PlayerId; reason: GameOverReason; standings: Standing[] };
+
+export type GameOverReason =
+  /** Everyone else went bankrupt. */
+  | "lastStanding"
+  /** The mode's bankruptcy limit was reached; scored by net worth. */
+  | "bankruptcies"
+  /** The round limit was reached; scored by net worth. */
+  | "roundLimit"
+  /** The time limit expired and the final round finished; scored by net worth. */
+  | "timeLimit"
+  /** The host ended the game; a provisional result by net worth. */
+  | "endedEarly";
+
+export type Standing = {
+  playerId: PlayerId;
+  rank: number;
+  bankrupt: boolean;
+  cash: number;
+  /** Printed price of unsealed holdings plus half the price of sealed ones. */
+  propertyValue: number;
+  /** What the player's Guardians and Walkers cost to build. */
+  buildingValue: number;
+  netWorth: number;
+};
 
 export type TurnState = {
   /** Index into `players` of the player whose turn it is. */
   playerIndex: number;
-  /** Increments every time the turn passes; used for round counting. */
+  /** Increments every time the turn passes. */
   number: number;
+  /** Increments each time play wraps around to the first seat. */
+  round: number;
   /** Consecutive doubles rolled this turn. */
   doublesCount: number;
   /** Whether the current roll entitles the player to roll again once it resolves. */
@@ -123,6 +149,10 @@ export type GameState = {
   auctionQueue: number[];
   trades: Trade[];
   nextTradeId: number;
+  /** Bankrupt players, in the order they went bankrupt. */
+  eliminationOrder: PlayerId[];
+  /** When set, the game ends once this round is complete (the time limit expired). */
+  finalRound: number | null;
   rng: RngState;
 };
 
@@ -180,7 +210,10 @@ export type GameEvent =
     }
   | { type: "bankrupt"; playerId: PlayerId; creditor: PlayerId | "bank" }
   | { type: "turnStarted"; playerId: PlayerId }
-  | { type: "gameOver"; winnerId: PlayerId };
+  /** Players whose decision timer ran out and who were auto-played. */
+  | { type: "timedOut"; playerIds: PlayerId[] }
+  | { type: "finalRound"; round: number }
+  | { type: "gameOver"; winnerId: PlayerId; reason: GameOverReason };
 
 export type RuleErrorCode = "game_over" | "unknown_player" | "not_your_turn" | "illegal_action";
 

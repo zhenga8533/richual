@@ -1,6 +1,6 @@
 import { getBoard, isOwnable } from "./board";
 import type { RuleConfig } from "./config";
-import { applyAction, createGame, type NewPlayer } from "./game";
+import { applyAction, applyTimeout, createGame, type NewPlayer } from "./game";
 import { checkAction, getLegalActions } from "./legal";
 import { nextFloat, nextInt, type RngState, seedRng } from "./rng";
 import { activePlayers } from "./rules";
@@ -115,11 +115,13 @@ function actors(state: GameState): PlayerId[] {
     .map((p) => p.id);
 }
 
+/** One recorded step: a player's action, or the decision timer running out. */
+export type SimulationMove = { playerId: PlayerId; action: Action } | { timeout: true };
+
 export type SimulationStep = {
   before: GameState;
   after: GameState;
-  playerId: PlayerId;
-  action: Action;
+  move: SimulationMove;
   events: GameEvent[];
 };
 
@@ -130,56 +132,76 @@ export type SimulationOptions = {
   /** Stop after this many turns even if nobody has won. */
   maxTurns: number;
   policy?: Policy;
+  /** Chance per step that the blocking player times out instead of acting. */
+  timeoutChance?: number;
   onStep?: (step: SimulationStep) => void;
 };
 
 export type SimulationResult = {
   finished: boolean;
   turns: number;
-  actions: { playerId: PlayerId; action: Action }[];
+  moves: SimulationMove[];
   initial: GameState;
   final: GameState;
 };
 
+function applyMove(state: GameState, move: SimulationMove) {
+  return "timeout" in move ? applyTimeout(state) : applyAction(state, move.playerId, move.action);
+}
+
 /** Plays a whole game with `policy` choosing every action. Used for invariant testing and balance tuning. */
 export function simulateGame(options: SimulationOptions): SimulationResult {
-  const { players, rules, seed, maxTurns, policy = randomPolicy, onStep } = options;
+  const {
+    players,
+    rules,
+    seed,
+    maxTurns,
+    policy = randomPolicy,
+    timeoutChance = 0,
+    onStep,
+  } = options;
   const initial = createGame(players, rules, seed);
   let state = initial;
   let rng = seedRng(seed ^ 0x5bd1e995);
-  const actions: SimulationResult["actions"] = [];
+  const moves: SimulationMove[] = [];
 
   while (state.phase.kind !== "gameOver" && state.turn.number <= maxTurns) {
-    const candidates = actors(state);
-    if (candidates.length === 0) throw new Error(`nobody can act in phase ${state.phase.kind}`);
-    let playerId: PlayerId;
-    [playerId, rng] = pick(candidates, rng);
-    let action: Action;
-    [action, rng] = policy(state, playerId, getLegalActions(state, playerId), rng);
-
-    const result = applyAction(state, playerId, action);
-    if (!result.ok) {
-      throw new Error(`policy action ${action.type} was rejected: ${result.error.message}`);
+    let move: SimulationMove;
+    let f: number;
+    [f, rng] = nextFloat(rng);
+    if (f < timeoutChance) {
+      move = { timeout: true };
+    } else {
+      const candidates = actors(state);
+      if (candidates.length === 0) throw new Error(`nobody can act in phase ${state.phase.kind}`);
+      let playerId: PlayerId;
+      [playerId, rng] = pick(candidates, rng);
+      let action: Action;
+      [action, rng] = policy(state, playerId, getLegalActions(state, playerId), rng);
+      move = { playerId, action };
     }
-    actions.push({ playerId, action });
-    onStep?.({ before: state, after: result.state, playerId, action, events: result.events });
+
+    const result = applyMove(state, move);
+    if (!result.ok) throw new Error(`simulated move was rejected: ${result.error.message}`);
+    moves.push(move);
+    onStep?.({ before: state, after: result.state, move, events: result.events });
     state = result.state;
   }
 
   return {
     finished: state.phase.kind === "gameOver",
     turns: state.turn.number,
-    actions,
+    moves,
     initial,
     final: state,
   };
 }
 
-/** Re-applies a recorded action log; must reproduce the original final state exactly. */
-export function replay(initial: GameState, actions: SimulationResult["actions"]): GameState {
+/** Re-applies recorded moves; must reproduce the original final state exactly. */
+export function replay(initial: GameState, moves: readonly SimulationMove[]): GameState {
   let state = initial;
-  for (const { playerId, action } of actions) {
-    const result = applyAction(state, playerId, action);
+  for (const move of moves) {
+    const result = applyMove(state, move);
     if (!result.ok) throw new Error(`replay diverged: ${result.error.message}`);
     state = result.state;
   }

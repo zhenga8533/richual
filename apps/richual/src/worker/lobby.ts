@@ -1,16 +1,20 @@
 import { DurableObject } from "cloudflare:workers";
 import {
   type Action,
+  type ApplyResult,
   applyAction,
-  CLASSIC_RULES,
+  applyTimeout,
   createGame,
+  endEarly,
   type GameEvent,
   type GameState,
   HERO_IDS,
   migrateState,
+  startFinalRound,
   toPublicState,
 } from "@richual/engine";
 import {
+  AUCTION_TIMER_SECONDS,
   ClientMessage,
   CloseCode,
   type ErrorCode,
@@ -22,6 +26,7 @@ import {
   PING,
   PONG,
   PROTOCOL_VERSION,
+  rulesFromSettings,
   type ServerMessage,
   type SessionResponse,
 } from "@richual/protocol";
@@ -31,6 +36,18 @@ import { isInitialized, migrate } from "./schema";
 /** Lobbies with no activity for this long are deleted. */
 export const IDLE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export const HELLO_TIMEOUT_MS = 5_000;
+/** How long the host may be disconnected before hosting passes to someone else. */
+export const HOST_GRACE_MS = 2 * 60 * 1000;
+const CHAT_HISTORY = 30;
+/** Token bucket per socket: bursts of this many messages, refilled at RATE_REFILL_PER_SEC. */
+const RATE_BURST = 20;
+const RATE_REFILL_PER_SEC = 5;
+/** While paused, players may still negotiate; nothing executes until play resumes. */
+const ALLOWED_WHILE_PAUSED = new Set<Action["type"]>([
+  "proposeTrade",
+  "cancelTrade",
+  "rejectTrade",
+]);
 
 type Attachment = { playerId: string | null; connectedAt: number };
 
@@ -41,6 +58,11 @@ type LobbyRow = {
   status: LobbyStatus;
   settings_json: string;
   version: number;
+  paused: number;
+  play_ms: number;
+  resumed_at: number | null;
+  action_deadline: number | null;
+  host_check_at: number | null;
 };
 type PlayerRow = { id: string; name: string; seat: number; hero: string | null };
 
@@ -59,11 +81,16 @@ class RequestError extends Error {
 
 /**
  * One instance per lobby, addressed by invite code. Owns the lobby's players,
- * sessions, sockets and the authoritative game state. Every message is handled
- * synchronously after authentication, so actions within a lobby never race.
- * WebSockets use the Hibernation API so an idle lobby costs nothing.
+ * sessions, sockets, clock and the authoritative game state. Every message is
+ * handled synchronously after authentication, so actions within a lobby never
+ * race. WebSockets use the Hibernation API so an idle lobby costs nothing; one
+ * alarm drives every deadline (decision timers, the time limit, host handover
+ * and idle cleanup).
  */
 export class LobbyDO extends DurableObject<Env> {
+  /** In memory only: losing it on hibernation merely resets the limits. */
+  private readonly rateBuckets = new WeakMap<WebSocket, { tokens: number; at: number }>();
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair(PING, PONG));
@@ -88,7 +115,7 @@ export class LobbyDO extends DurableObject<Env> {
       now,
     );
     this.insertPlayer(playerId, hostName, 0, tokenHash, now);
-    await this.ctx.storage.setAlarm(now + IDLE_TTL_MS);
+    await this.scheduleAlarm();
     return { code, playerId, token };
   }
 
@@ -138,6 +165,10 @@ export class LobbyDO extends DurableObject<Env> {
       safeClose(ws, 1009, "message too large or not text");
       return;
     }
+    if (!this.takeToken(ws)) {
+      send(ws, { type: "error", error: "rate_limited", message: "Slow down a little" });
+      return;
+    }
     let json: unknown;
     try {
       json = JSON.parse(raw);
@@ -169,49 +200,79 @@ export class LobbyDO extends DurableObject<Env> {
       switch (msg.type) {
         case "setHero":
           this.setHero(playerId, msg.hero);
-          return;
+          break;
         case "updateSettings":
           this.updateSettings(playerId, msg.settings);
-          return;
+          break;
         case "startGame":
           this.startGame(playerId);
-          return;
+          break;
         case "returnToLobby":
           this.returnToLobby(playerId);
-          return;
+          break;
+        case "pause":
+          this.setPaused(playerId, true);
+          break;
+        case "resume":
+          this.setPaused(playerId, false);
+          break;
+        case "endGame":
+          this.requireHost(playerId);
+          this.requireStatus("playing");
+          this.commitGame(endEarly(this.game()), Date.now());
+          break;
+        case "chat":
+          this.chat(playerId, msg.text);
+          break;
         case "action":
           this.handleAction(ws, playerId, msg.clientActionId, msg.expectedVersion, msg.action);
-          return;
+          break;
       }
     } catch (error) {
       if (!(error instanceof RequestError)) throw error;
       send(ws, { type: "error", error: error.code, message: error.message, clientActionId });
     }
+    await this.scheduleAlarm();
   }
 
   override async webSocketClose(ws: WebSocket, code: number, reason: string): Promise<void> {
     safeClose(ws, code, reason);
-    this.broadcast([], ws);
+    await this.onDisconnect(ws);
   }
 
   override async webSocketError(ws: WebSocket, error: unknown): Promise<void> {
     console.error("lobby websocket error", error);
-    this.broadcast([], ws);
+    await this.onDisconnect(ws);
   }
 
   override async alarm(): Promise<void> {
-    const lobby = this.lobby();
+    let lobby = this.lobby();
     if (!lobby) return;
-    const expiresAt = lobby.last_active_at + IDLE_TTL_MS;
-    if (Date.now() < expiresAt) {
-      await this.ctx.storage.setAlarm(expiresAt);
+    const now = Date.now();
+    if (now >= lobby.last_active_at + IDLE_TTL_MS) {
+      console.log("deleting idle lobby", lobby.code);
+      for (const ws of this.ctx.getWebSockets()) {
+        safeClose(ws, CloseCode.LobbyClosed, "lobby expired");
+      }
+      await this.ctx.storage.deleteAlarm();
+      await this.ctx.storage.deleteAll();
       return;
     }
-    console.log("deleting idle lobby", lobby.code);
-    for (const ws of this.ctx.getWebSockets())
-      safeClose(ws, CloseCode.LobbyClosed, "lobby expired");
-    await this.ctx.storage.deleteAlarm();
-    await this.ctx.storage.deleteAll();
+
+    if (lobby.status === "playing" && !lobby.paused) {
+      if (lobby.action_deadline !== null && now >= lobby.action_deadline) {
+        this.commitGame(applyTimeout(this.game()), now);
+        lobby = this.requireLobby();
+      }
+      const limitAt = this.timeLimitAt(lobby);
+      if (lobby.status === "playing" && limitAt !== null && now >= limitAt) {
+        this.commitGame(startFinalRound(this.game()), now);
+      }
+    }
+
+    lobby = this.requireLobby();
+    if (lobby.host_check_at !== null && now >= lobby.host_check_at) this.handOverHost(now);
+    await this.scheduleAlarm();
   }
 
   // ---------- Message handlers ----------
@@ -243,9 +304,28 @@ export class LobbyDO extends DurableObject<Env> {
       }
     }
     ws.serializeAttachment({ ...attachment(ws), playerId: player.id } satisfies Attachment);
-    this.touch(Date.now());
+    const now = Date.now();
+    this.touch(now);
+    const lobby = this.requireLobby();
+    if (lobby.host_id === player.id) {
+      this.sql.exec("UPDATE lobby SET host_check_at = NULL WHERE id = 1");
+    } else if (!this.connectedIds().has(lobby.host_id) && lobby.host_check_at === null) {
+      // The host left while nobody else was here to take over; start the clock now.
+      this.sql.exec("UPDATE lobby SET host_check_at = ? WHERE id = 1", now + HOST_GRACE_MS);
+    }
     send(ws, { type: "welcome", playerId: player.id, lobby: this.snapshot() });
     this.broadcast([], undefined, ws);
+    await this.scheduleAlarm();
+  }
+
+  private async onDisconnect(ws: WebSocket): Promise<void> {
+    const lobby = this.lobby();
+    if (!lobby) return;
+    if (attachment(ws).playerId === lobby.host_id) {
+      this.sql.exec("UPDATE lobby SET host_check_at = ? WHERE id = 1", Date.now() + HOST_GRACE_MS);
+      await this.scheduleAlarm();
+    }
+    this.broadcast([], ws);
   }
 
   private setHero(playerId: string, hero: string): void {
@@ -279,7 +359,7 @@ export class LobbyDO extends DurableObject<Env> {
     const seed = crypto.getRandomValues(new Uint32Array(1))[0] ?? 0;
     const state = createGame(
       players.map((p) => ({ id: p.id, name: p.name })),
-      { ...CLASSIC_RULES, ...settings, limitedBuildings: settings.evenBuilding },
+      rulesFromSettings(settings),
       seed,
     );
     const now = Date.now();
@@ -290,7 +370,11 @@ export class LobbyDO extends DurableObject<Env> {
         JSON.stringify(state),
         now,
       );
-      this.sql.exec("UPDATE lobby SET status = 'playing' WHERE id = 1");
+      this.sql.exec(
+        "UPDATE lobby SET status = 'playing', paused = 0, play_ms = 0, resumed_at = ?, action_deadline = ? WHERE id = 1",
+        now,
+        actionDeadline(state, settings, now),
+      );
       this.bumpVersion(now);
     });
     const first = state.players[state.turn.playerIndex];
@@ -303,9 +387,49 @@ export class LobbyDO extends DurableObject<Env> {
     this.ctx.storage.transactionSync(() => {
       this.sql.exec("DELETE FROM game");
       this.sql.exec("DELETE FROM actions");
-      this.sql.exec("UPDATE lobby SET status = 'open' WHERE id = 1");
+      this.sql.exec(
+        "UPDATE lobby SET status = 'open', paused = 0, play_ms = 0, resumed_at = NULL, action_deadline = NULL WHERE id = 1",
+      );
       this.bumpVersion(Date.now());
     });
+    this.broadcast([]);
+  }
+
+  private setPaused(playerId: string, paused: boolean): void {
+    this.requireHost(playerId);
+    const lobby = this.requireStatus("playing");
+    if (Boolean(lobby.paused) === paused) {
+      throw new RequestError(
+        "rejected",
+        paused ? "The game is already paused" : "The game is not paused",
+      );
+    }
+    const now = Date.now();
+    if (paused) {
+      // Bank the active time so far; decision timers stop while paused.
+      this.sql.exec(
+        "UPDATE lobby SET paused = 1, play_ms = play_ms + ?, resumed_at = NULL, action_deadline = NULL WHERE id = 1",
+        now - (lobby.resumed_at ?? now),
+      );
+    } else {
+      // Whoever was deciding gets a fresh full timer after a pause.
+      const deadline = actionDeadline(this.game(), parseSettings(lobby.settings_json), now);
+      this.sql.exec(
+        "UPDATE lobby SET paused = 0, resumed_at = ?, action_deadline = ? WHERE id = 1",
+        now,
+        deadline,
+      );
+    }
+    this.bumpVersion(now);
+    this.broadcast([]);
+  }
+
+  private chat(playerId: string, text: string): void {
+    const now = Date.now();
+    this.sql.exec("INSERT INTO chat (player_id, text, at) VALUES (?, ?, ?)", playerId, text, now);
+    this.sql.exec("DELETE FROM chat WHERE seq <= (SELECT MAX(seq) FROM chat) - ?", CHAT_HISTORY);
+    // Chat never bumps the version, so it cannot make anyone's pending action stale.
+    this.touch(now);
     this.broadcast([]);
   }
 
@@ -331,6 +455,10 @@ export class LobbyDO extends DurableObject<Env> {
       return;
     }
 
+    if (lobby.paused && !ALLOWED_WHILE_PAUSED.has(action.type)) {
+      throw new RequestError("paused", "The game is paused");
+    }
+
     if (expectedVersion !== lobby.version) {
       send(ws, {
         type: "error",
@@ -344,27 +472,112 @@ export class LobbyDO extends DurableObject<Env> {
 
     const result = applyAction(this.game(), playerId, action);
     if (!result.ok) throw new RequestError("rejected", result.error.message);
+    this.commitGame(result, Date.now(), { playerId, clientActionId, action });
+    send(ws, { type: "ack", clientActionId });
+  }
 
-    const now = Date.now();
-    const finished = result.state.phase.kind === "gameOver";
+  /**
+   * Persists a new game state with everything that depends on it (status,
+   * clock, decision timer, version) in one transaction, then broadcasts it.
+   */
+  private commitGame(
+    result: ApplyResult,
+    now: number,
+    logged?: { playerId: string; clientActionId: string; action: Action },
+  ): void {
+    if (!result.ok) throw new RequestError("rejected", result.error.message);
+    const { state, events } = result;
+    const lobby = this.requireLobby();
+    const finished = state.phase.kind === "gameOver";
+    // Trade talk while paused leaves the clocks stopped.
+    const deadline = lobby.paused
+      ? null
+      : actionDeadline(state, parseSettings(lobby.settings_json), now);
+
     this.ctx.storage.transactionSync(() => {
       this.sql.exec(
         "UPDATE game SET state_json = ?, updated_at = ? WHERE id = 1",
-        JSON.stringify(result.state),
+        JSON.stringify(state),
         now,
       );
-      this.sql.exec(
-        "INSERT INTO actions (player_id, client_action_id, action_json, at) VALUES (?, ?, ?, ?)",
-        playerId,
-        clientActionId,
-        JSON.stringify(action),
-        now,
-      );
-      if (finished) this.sql.exec("UPDATE lobby SET status = 'finished' WHERE id = 1");
+      if (logged) {
+        this.sql.exec(
+          "INSERT INTO actions (player_id, client_action_id, action_json, at) VALUES (?, ?, ?, ?)",
+          logged.playerId,
+          logged.clientActionId,
+          JSON.stringify(logged.action),
+          now,
+        );
+      }
+      if (finished) {
+        this.sql.exec(
+          "UPDATE lobby SET status = 'finished', paused = 0, play_ms = play_ms + ?, resumed_at = NULL, action_deadline = NULL WHERE id = 1",
+          lobby.resumed_at === null ? 0 : now - lobby.resumed_at,
+        );
+      } else {
+        this.sql.exec("UPDATE lobby SET action_deadline = ? WHERE id = 1", deadline);
+      }
       this.bumpVersion(now);
     });
-    send(ws, { type: "ack", clientActionId });
-    this.broadcast(result.events);
+    this.broadcast(events);
+  }
+
+  /** Passes hosting to the longest-connected player if the host is still away. */
+  private handOverHost(now: number): void {
+    const lobby = this.requireLobby();
+    this.sql.exec("UPDATE lobby SET host_check_at = NULL WHERE id = 1");
+    if (this.connectedIds().has(lobby.host_id)) return;
+    const successor = this.ctx
+      .getWebSockets()
+      .filter((ws) => ws.readyState === WebSocket.OPEN && attachment(ws).playerId !== null)
+      .sort((a, b) => attachment(a).connectedAt - attachment(b).connectedAt)[0];
+    const successorId = successor ? attachment(successor).playerId : null;
+    if (!successorId) return;
+    this.sql.exec("UPDATE lobby SET host_id = ? WHERE id = 1", successorId);
+    this.bumpVersion(now);
+    this.broadcast([]);
+  }
+
+  // ---------- Deadlines ----------
+
+  /** When active play reaches the time limit, or null if there is no running limit. */
+  private timeLimitAt(lobby: LobbyRow): number | null {
+    const { limit } = parseSettings(lobby.settings_json);
+    if (limit.kind !== "minutes" || lobby.status !== "playing" || lobby.resumed_at === null) {
+      return null;
+    }
+    if (this.game().finalRound !== null) return null;
+    return lobby.resumed_at + limit.minutes * 60_000 - lobby.play_ms;
+  }
+
+  private async scheduleAlarm(): Promise<void> {
+    const lobby = this.lobby();
+    if (!lobby) return;
+    const candidates = [
+      lobby.last_active_at + IDLE_TTL_MS,
+      lobby.status === "playing" && !lobby.paused ? lobby.action_deadline : null,
+      this.timeLimitAt(lobby),
+      lobby.host_check_at,
+    ].filter((t): t is number => t !== null);
+    const next = Math.min(...candidates);
+    if ((await this.ctx.storage.getAlarm()) !== next) await this.ctx.storage.setAlarm(next);
+  }
+
+  private takeToken(ws: WebSocket): boolean {
+    const now = Date.now();
+    const bucket = this.rateBuckets.get(ws) ?? { tokens: RATE_BURST, at: now };
+    bucket.tokens = Math.min(
+      RATE_BURST,
+      bucket.tokens + ((now - bucket.at) / 1000) * RATE_REFILL_PER_SEC,
+    );
+    bucket.at = now;
+    if (bucket.tokens < 1) {
+      this.rateBuckets.set(ws, bucket);
+      return false;
+    }
+    bucket.tokens -= 1;
+    this.rateBuckets.set(ws, bucket);
+    return true;
   }
 
   // ---------- Storage ----------
@@ -377,7 +590,9 @@ export class LobbyDO extends DurableObject<Env> {
     if (!isInitialized(this.sql)) return undefined;
     return this.sql
       .exec<LobbyRow>(
-        "SELECT code, host_id, last_active_at, status, settings_json, version FROM lobby WHERE id = 1",
+        `SELECT code, host_id, last_active_at, status, settings_json, version, paused, play_ms,
+                resumed_at, action_deadline, host_check_at
+           FROM lobby WHERE id = 1`,
       )
       .toArray()[0];
   }
@@ -445,15 +660,20 @@ export class LobbyDO extends DurableObject<Env> {
 
   // ---------- Snapshots ----------
 
-  /** @param closing a socket that is closing and must not count as connected */
-  private snapshot(closing?: WebSocket): LobbySnapshot {
-    const lobby = this.requireLobby();
-    const connected = new Set(
+  private connectedIds(closing?: WebSocket): Set<string | null> {
+    return new Set(
       this.ctx
         .getWebSockets()
         .filter((ws) => ws !== closing && ws.readyState === WebSocket.OPEN)
         .map((ws) => attachment(ws).playerId),
     );
+  }
+
+  /** @param closing a socket that is closing and must not count as connected */
+  private snapshot(closing?: WebSocket): LobbySnapshot {
+    const lobby = this.requireLobby();
+    const settings = parseSettings(lobby.settings_json);
+    const connected = this.connectedIds(closing);
     const players = this.players().map((p) => ({
       ...p,
       hero: (HERO_IDS as readonly string[]).includes(p.hero ?? "")
@@ -461,14 +681,29 @@ export class LobbyDO extends DurableObject<Env> {
         : null,
       connected: connected.has(p.id),
     }));
+    const chat = this.sql
+      .exec<{ seq: number; player_id: string; text: string; at: number }>(
+        "SELECT seq, player_id, text, at FROM chat ORDER BY seq",
+      )
+      .toArray()
+      .map((m) => ({ id: m.seq, playerId: m.player_id, text: m.text, at: m.at }));
     return {
       code: lobby.code,
       hostId: lobby.host_id,
       status: lobby.status,
       version: lobby.version,
-      settings: parseSettings(lobby.settings_json),
+      settings,
       players,
       game: lobby.status === "open" ? null : toPublicState(this.game()),
+      paused: Boolean(lobby.paused),
+      clock: {
+        playMs: lobby.play_ms,
+        resumedAt: lobby.resumed_at,
+        limitMs: settings.limit.kind === "minutes" ? settings.limit.minutes * 60_000 : null,
+      },
+      actionDeadline: lobby.status === "playing" && !lobby.paused ? lobby.action_deadline : null,
+      serverNow: Date.now(),
+      chat,
     };
   }
 
@@ -482,10 +717,18 @@ export class LobbyDO extends DurableObject<Env> {
   }
 }
 
+/** When the current decision will be auto-played: auctions always, other decisions if the host set a timer. */
+function actionDeadline(state: GameState, settings: LobbySettings, now: number): number | null {
+  if (state.phase.kind === "gameOver") return null;
+  if (state.phase.kind === "auction") return now + AUCTION_TIMER_SECONDS * 1000;
+  return settings.turnTimerSeconds > 0 ? now + settings.turnTimerSeconds * 1000 : null;
+}
+
 function parseSettings(json: string): LobbySettings {
   const parsed = LobbySettings.safeParse(JSON.parse(json));
-  if (!parsed.success)
+  if (!parsed.success) {
     throw new Error(`stored lobby settings are invalid: ${parsed.error.message}`);
+  }
   return parsed.data;
 }
 

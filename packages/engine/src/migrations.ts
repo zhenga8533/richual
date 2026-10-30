@@ -1,4 +1,5 @@
 import { CLASSIC_RULES } from "./config";
+import { computeStandings } from "./scoring";
 import { type GameState, STATE_SCHEMA_VERSION } from "./state";
 
 type Migration = (state: Record<string, unknown>) => Record<string, unknown>;
@@ -26,6 +27,37 @@ const MIGRATIONS: Record<number, Migration> = {
       trades: [],
       nextTradeId: 1,
     };
+  },
+  // v3 added game modes, round tracking and scored endings.
+  2: (s) => {
+    const players = s.players as { id: string; bankrupt: boolean }[];
+    const turn = s.turn as { number: number };
+    const config = {
+      ...(s.config as object),
+      guardiansPerWalker: CLASSIC_RULES.guardiansPerWalker,
+      startingProperties: CLASSIC_RULES.startingProperties,
+      bankruptciesToEnd: CLASSIC_RULES.bankruptciesToEnd,
+      roundLimit: CLASSIC_RULES.roundLimit,
+    };
+    // The order of earlier bankruptcies was not recorded; seat order stands in.
+    const eliminationOrder = players.filter((p) => p.bankrupt).map((p) => p.id);
+    const next: Record<string, unknown> = {
+      ...s,
+      schemaVersion: 3,
+      config,
+      turn: { ...turn, round: Math.ceil(turn.number / players.length) },
+      eliminationOrder,
+      finalRound: null,
+    };
+    const phase = s.phase as { kind: string };
+    if (phase.kind === "gameOver") {
+      next.phase = {
+        ...phase,
+        reason: "lastStanding",
+        standings: computeStandings(next as unknown as GameState),
+      };
+    }
+    return next;
   },
 };
 

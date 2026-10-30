@@ -1,9 +1,9 @@
-import type { Action, GameEvent, PublicGameState } from "@richual/engine";
-import { HERO_IDS } from "@richual/engine";
+import type { Action, GameEvent, PublicGameState, RuleConfig } from "@richual/engine";
+import { HERO_IDS, MODES } from "@richual/engine";
 import { z } from "zod";
 
 /** Bumped on any breaking change to the wire format; clients on another version must reload. */
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 
 export const MAX_MESSAGE_BYTES = 16 * 1024;
 export const MAX_PLAYERS = 6;
@@ -51,6 +51,9 @@ export const ErrorCode = z.enum([
   "stale",
   /** The game rules refused the action. */
   "rejected",
+  /** Game actions wait while the host has paused the game. */
+  "paused",
+  "rate_limited",
   "internal",
 ]);
 export type ErrorCode = z.infer<typeof ErrorCode>;
@@ -62,6 +65,11 @@ export type ErrorResponse = z.infer<typeof ErrorResponse>;
 
 export const HeroId = z.enum(HERO_IDS);
 
+export const TURN_TIMER_OPTIONS: readonly number[] = [0, 30, 60, 90, 120];
+/** Auctions always run on a timer, reset by every bid, so one idle bidder cannot stall play. */
+export const AUCTION_TIMER_SECONDS = 20;
+export const MAX_CHAT_LENGTH = 200;
+
 export const LobbySettings = z.object({
   startingCash: z.number().int().min(500).max(5000).multipleOf(100).default(1500),
   doubleOnExactGo: z.boolean().default(true),
@@ -69,8 +77,38 @@ export const LobbySettings = z.object({
   auctions: z.boolean().default(true),
   /** Even building plus the bank's limited Guardian and Walker supply. */
   evenBuilding: z.boolean().default(true),
+  mode: z.enum(["classic", "quick"]).default("classic"),
+  /** When the game is scored if nobody has won outright. */
+  limit: z
+    .discriminatedUnion("kind", [
+      z.object({ kind: z.literal("none") }),
+      z.object({ kind: z.literal("rounds"), rounds: z.number().int().min(5).max(100) }),
+      /** Active play time, excluding pauses; the round in progress is finished. */
+      z.object({ kind: z.literal("minutes"), minutes: z.number().int().min(10).max(240) }),
+    ])
+    .default({ kind: "none" }),
+  /** Seconds before an idle decision is auto-played; 0 turns the timer off. */
+  turnTimerSeconds: z
+    .number()
+    .int()
+    .refine((n) => TURN_TIMER_OPTIONS.includes(n), "Unsupported turn timer")
+    .default(0),
 });
 export type LobbySettings = z.infer<typeof LobbySettings>;
+
+/** The engine rules a lobby's settings produce: the mode's preset with the host's overrides. */
+export function rulesFromSettings(settings: LobbySettings): RuleConfig {
+  return {
+    ...MODES[settings.mode],
+    startingCash: settings.startingCash,
+    doubleOnExactGo: settings.doubleOnExactGo,
+    freeParkingJackpot: settings.freeParkingJackpot,
+    auctions: settings.auctions,
+    evenBuilding: settings.evenBuilding,
+    limitedBuildings: settings.evenBuilding,
+    roundLimit: settings.limit.kind === "rounds" ? settings.limit.rounds : null,
+  };
+}
 
 export const LobbyStatus = z.enum(["open", "playing", "finished"]);
 export type LobbyStatus = z.infer<typeof LobbyStatus>;
@@ -84,6 +122,14 @@ export const LobbyPlayer = z.object({
 });
 export type LobbyPlayer = z.infer<typeof LobbyPlayer>;
 
+export const ChatMessage = z.object({
+  id: z.number().int(),
+  playerId: z.string(),
+  text: z.string(),
+  at: z.number(),
+});
+export type ChatMessage = z.infer<typeof ChatMessage>;
+
 export const LobbySnapshot = z.object({
   code: z.string(),
   hostId: z.string(),
@@ -94,6 +140,19 @@ export const LobbySnapshot = z.object({
   players: z.array(LobbyPlayer),
   // The game view comes from the authoritative server, so it is typed but not re-validated.
   game: z.custom<PublicGameState>((v) => typeof v === "object").nullable(),
+  paused: z.boolean(),
+  clock: z.object({
+    /** Active play time banked before the current stretch. */
+    playMs: z.number(),
+    /** When the current stretch of active play began; null while paused or not playing. */
+    resumedAt: z.number().nullable(),
+    limitMs: z.number().nullable(),
+  }),
+  /** When the current decision will be auto-played, or null if no timer is running. */
+  actionDeadline: z.number().nullable(),
+  /** Server time when this snapshot was made, so clients can correct for clock skew. */
+  serverNow: z.number(),
+  chat: z.array(ChatMessage),
 });
 export type LobbySnapshot = z.infer<typeof LobbySnapshot>;
 
@@ -154,6 +213,10 @@ export const ClientMessage = z.discriminatedUnion("type", [
   z.object({ type: z.literal("updateSettings"), settings: LobbySettings }),
   z.object({ type: z.literal("startGame") }),
   z.object({ type: z.literal("returnToLobby") }),
+  z.object({ type: z.literal("pause") }),
+  z.object({ type: z.literal("resume") }),
+  z.object({ type: z.literal("endGame") }),
+  z.object({ type: z.literal("chat"), text: z.string().trim().min(1).max(MAX_CHAT_LENGTH) }),
   z.object({
     type: z.literal("action"),
     /** Client-generated id; resending the same id never applies the action twice. */

@@ -70,7 +70,7 @@ export function Board({ game, players, myId, selected, onSelect }: Props) {
         <Dice roll={game.turn.lastRoll} />
         {current && (
           <p className="text-sm text-parchment-dim">
-            Turn {game.turn.number}: <span className="text-parchment">{current.name}</span>
+            Round {game.turn.round}: <span className="text-parchment">{current.name}</span>
           </p>
         )}
         {game.config.freeParkingJackpot && (

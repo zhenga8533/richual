@@ -1,11 +1,14 @@
-import { getBoard, type PublicGameState } from "@richual/engine";
+import { getBoard, getLegalActions, type PublicGameState, type Standing } from "@richual/engine";
 import type { LobbySnapshot } from "@richual/protocol";
 import { useEffect, useRef, useState } from "react";
+import { useAlertPreference, useNeedsYouAlert } from "../alerts";
 import { type LoggedEvent, send, useConnection } from "../connection";
 import { describeEvent } from "../describe";
 import { initials, SOULS, seatColor } from "../theme";
 import { ActionPanel } from "./ActionPanel";
 import { Board } from "./Board";
+import { ChatPanel } from "./ChatPanel";
+import { GameBar } from "./GameBar";
 import { heroLabel } from "./heroLabel";
 import { PropertyPanel } from "./PropertyPanel";
 import { TradePanel } from "./TradePanel";
@@ -13,19 +16,27 @@ import { TradePanel } from "./TradePanel";
 export function GameView({ lobby, game }: { lobby: LobbySnapshot; game: PublicGameState }) {
   const { playerId, log } = useConnection();
   const [selected, setSelected] = useState<number | null>(null);
-  const current = game.players[game.turn.playerIndex];
-  const myTurn = game.phase.kind !== "gameOver" && current?.id === playerId;
+  const [alertsOn, setAlertsOn] = useAlertPreference();
+  // Anything but withdrawing your own offer means the game is waiting on you.
+  const needsMe =
+    !lobby.paused &&
+    playerId !== null &&
+    getLegalActions(game, playerId).some((a) => a.type !== "cancelTrade");
 
+  useNeedsYouAlert(needsMe, alertsOn, "It's your move.");
   useEffect(() => {
-    document.title = myTurn ? `${SOULS} Your turn — Richual` : "Richual";
+    document.title = needsMe ? `${SOULS} Your move — Richual` : "Richual";
     return () => {
       document.title = "Richual";
     };
-  }, [myTurn]);
+  }, [needsMe]);
 
   return (
     <div className="grid w-full max-w-7xl gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
-      <div className="mx-auto w-full max-w-[min(100%,calc(100dvh-7rem))]">
+      <div className="lg:col-span-2">
+        <GameBar lobby={lobby} game={game} alertsOn={alertsOn} onAlertsChange={setAlertsOn} />
+      </div>
+      <div className="mx-auto w-full max-w-[min(100%,calc(100dvh-10rem))]">
         <Board
           game={game}
           players={lobby.players}
@@ -36,7 +47,12 @@ export function GameView({ lobby, game }: { lobby: LobbySnapshot; game: PublicGa
       </div>
       <aside className="flex min-w-0 flex-col gap-4">
         {game.phase.kind === "gameOver" ? (
-          <GameOver lobby={lobby} game={game} winnerId={game.phase.winnerId} />
+          <GameOver
+            lobby={lobby}
+            winnerId={game.phase.winnerId}
+            reason={game.phase.reason}
+            standings={game.phase.standings}
+          />
         ) : (
           <ActionPanel lobby={lobby} game={game} />
         )}
@@ -51,27 +67,80 @@ export function GameView({ lobby, game }: { lobby: LobbySnapshot; game: PublicGa
         <Players lobby={lobby} game={game} />
         {game.phase.kind !== "gameOver" && <TradePanel lobby={lobby} game={game} />}
         <EventLog log={log} lobby={lobby} game={game} />
+        <ChatPanel lobby={lobby} />
       </aside>
     </div>
   );
 }
 
+const END_REASONS: Record<string, string> = {
+  lastStanding: "Every rival is soul-bankrupt.",
+  bankruptcies: "The bankruptcy limit was reached; ranked by net worth.",
+  roundLimit: "The round limit was reached; ranked by net worth.",
+  timeLimit: "Time ran out and the final round finished; ranked by net worth.",
+  endedEarly: "The host ended the game early. This is a provisional result by net worth.",
+};
+
 function GameOver({
   lobby,
-  game,
   winnerId,
+  reason,
+  standings,
 }: {
   lobby: LobbySnapshot;
-  game: PublicGameState;
   winnerId: string;
+  reason: string;
+  standings: Standing[];
 }) {
   const { playerId } = useConnection();
-  const winner = game.players.find((p) => p.id === winnerId);
+  const name = (id: string) => lobby.players.find((p) => p.id === id)?.name ?? "Someone";
   return (
     <section className="panel flex flex-col gap-3 p-4" aria-live="polite">
       <h2 className="font-display text-2xl text-brass">
-        {winnerId === playerId ? "You win the ritual!" : `${winner?.name ?? "Someone"} wins!`}
+        {winnerId === playerId ? "You win the ritual!" : `${name(winnerId)} wins!`}
+        {reason === "endedEarly" && (
+          <span className="ml-2 align-middle text-xs text-amber">Provisional</span>
+        )}
       </h2>
+      <p className="text-sm text-parchment-dim">{END_REASONS[reason]}</p>
+      <table className="w-full text-sm">
+        <caption className="sr-only">Final standings</caption>
+        <thead className="text-left text-xs text-parchment-dim">
+          <tr>
+            <th scope="col">#</th>
+            <th scope="col">Player</th>
+            <th scope="col" className="text-right">
+              Souls
+            </th>
+            <th scope="col" className="text-right">
+              Holdings
+            </th>
+            <th scope="col" className="text-right">
+              Buildings
+            </th>
+            <th scope="col" className="text-right">
+              Net worth
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {standings.map((st) => (
+            <tr key={st.playerId} className={st.bankrupt ? "opacity-50" : ""}>
+              <td>{st.rank}</td>
+              <td className={st.playerId === playerId ? "font-semibold" : ""}>
+                {name(st.playerId)}
+                {st.bankrupt && <span className="text-parchment-dim"> (bankrupt)</span>}
+              </td>
+              <td className="text-right tabular-nums">{st.cash}</td>
+              <td className="text-right tabular-nums">{st.propertyValue}</td>
+              <td className="text-right tabular-nums">{st.buildingValue}</td>
+              <td className="text-right tabular-nums text-amber">
+                {st.netWorth} {SOULS}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
       {playerId === lobby.hostId ? (
         <button
           type="button"

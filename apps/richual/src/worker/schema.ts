@@ -34,6 +34,17 @@ const MIGRATIONS: readonly string[] = [
      at INTEGER NOT NULL,
      UNIQUE (player_id, client_action_id)
    );`,
+  `ALTER TABLE lobby ADD COLUMN paused INTEGER NOT NULL DEFAULT 0;
+   ALTER TABLE lobby ADD COLUMN play_ms INTEGER NOT NULL DEFAULT 0;
+   ALTER TABLE lobby ADD COLUMN resumed_at INTEGER;
+   ALTER TABLE lobby ADD COLUMN action_deadline INTEGER;
+   ALTER TABLE lobby ADD COLUMN host_check_at INTEGER;
+   CREATE TABLE chat (
+     seq INTEGER PRIMARY KEY AUTOINCREMENT,
+     player_id TEXT NOT NULL,
+     text TEXT NOT NULL,
+     at INTEGER NOT NULL
+   );`,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

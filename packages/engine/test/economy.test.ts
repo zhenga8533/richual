@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CURSED_APPLE } from "../src/board";
+import { CLASSIC_RULES } from "../src/config";
 import { applyAction, createGame } from "../src/game";
 import { getLegalActions } from "../src/legal";
 import { migrateState } from "../src/migrations";
@@ -259,7 +260,7 @@ describe("raising funds", () => {
     let s = inDebt();
     ({ state: s } = apply(s, "a", { type: "declareBankruptcy" }));
     expect(s.owners[37]).toBe("b");
-    expect(s.phase).toEqual({ kind: "gameOver", winnerId: "b" });
+    expect(s.phase).toMatchObject({ kind: "gameOver", winnerId: "b", reason: "lastStanding" });
   });
 
   it("goes straight to bankruptcy when even selling everything would not cover it", () => {
@@ -269,7 +270,7 @@ describe("raising funds", () => {
     own(s, "b", 37);
     player(s, "a").position = 36;
     player(s, "a").cash = 100;
-    expect(roll(s, [1, 2]).state.phase).toEqual({ kind: "gameOver", winnerId: "b" });
+    expect(roll(s, [1, 2]).state.phase).toMatchObject({ kind: "gameOver", winnerId: "b" });
   });
 
   it("moves a jailed player only after the forced fine is paid", () => {
@@ -410,34 +411,57 @@ describe("state migration", () => {
   it("upgrades a version 1 game", () => {
     const current = createGame(
       ["a", "b"].map((id) => ({ id, name: id })),
-      {
-        boardId: "cursed-apple",
-        startingCash: 1500,
-        goSalary: 200,
-        doubleOnExactGo: true,
-        freeParkingJackpot: true,
-        jailFine: 50,
-        maxJailTurns: 3,
-        auctions: true,
-        evenBuilding: true,
-        limitedBuildings: true,
-      },
+      CLASSIC_RULES,
       3,
     );
-    const { sealed, debts, auctionQueue, trades, nextTradeId, ...rest } = current;
-    const { auctions, evenBuilding, limitedBuildings, ...v1Config } = current.config;
-    const v1 = { ...rest, schemaVersion: 1, config: v1Config };
-    expect(migrateState(JSON.parse(JSON.stringify(v1)))).toEqual(current);
-    expect([
-      sealed,
-      debts,
-      auctionQueue,
-      trades,
-      nextTradeId,
-      auctions,
-      evenBuilding,
-      limitedBuildings,
-    ]).toBeDefined();
+    // Strip everything versions 2 and 3 added.
+    const v1 = JSON.parse(JSON.stringify(current));
+    for (const key of [
+      "sealed",
+      "debts",
+      "auctionQueue",
+      "trades",
+      "nextTradeId",
+      "eliminationOrder",
+      "finalRound",
+    ]) {
+      delete v1[key];
+    }
+    for (const key of [
+      "auctions",
+      "evenBuilding",
+      "limitedBuildings",
+      "guardiansPerWalker",
+      "startingProperties",
+      "bankruptciesToEnd",
+      "roundLimit",
+    ]) {
+      delete v1.config[key];
+    }
+    delete v1.turn.round;
+    v1.schemaVersion = 1;
+    expect(migrateState(v1)).toEqual(current);
+  });
+
+  it("scores a finished version 2 game", () => {
+    const v2 = JSON.parse(
+      JSON.stringify(
+        createGame(
+          ["a", "b"].map((id) => ({ id, name: id })),
+          CLASSIC_RULES,
+          3,
+        ),
+      ),
+    );
+    v2.schemaVersion = 2;
+    delete v2.eliminationOrder;
+    delete v2.finalRound;
+    delete v2.turn.round;
+    v2.players[1].bankrupt = true;
+    v2.phase = { kind: "gameOver", winnerId: v2.players[0].id };
+    const migrated = migrateState(v2);
+    expect(migrated.phase).toMatchObject({ kind: "gameOver", reason: "lastStanding" });
+    expect(migrated.eliminationOrder).toEqual([v2.players[1].id]);
   });
 
   it("refuses unknown or newer versions", () => {

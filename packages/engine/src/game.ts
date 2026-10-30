@@ -1,25 +1,36 @@
-import { type BoardDefinition, getBoard, groupIndices, indicesOfKind, jailIndex } from "./board";
+import {
+  type BoardDefinition,
+  getBoard,
+  groupIndices,
+  indicesOfKind,
+  isOwnable,
+  jailIndex,
+} from "./board";
 import { DECKS, type DeckId } from "./cards";
 import { MAX_PLAYERS, MIN_PLAYERS, type RuleConfig } from "./config";
-import { checkAction } from "./legal";
+import { checkAction, getLegalActions } from "./legal";
 import { nextInt, seedRng, shuffle } from "./rng";
 import {
   activePlayers,
+  buildingRank,
   currentPlayer,
   levelAfterSale,
   liquidationValue,
   mortgageValue,
+  nextBuildingLevel,
   sealedTransferFee,
   tradeProblem,
   unsealCost,
   WALKER,
 } from "./rules";
+import { computeStandings } from "./scoring";
 import {
   type Account,
   type Action,
   type ApplyResult,
   type DebtContinuation,
   type GameEvent,
+  type GameOverReason,
   type GameState,
   type PlayerId,
   type PlayerState,
@@ -51,6 +62,11 @@ export function createGame(
 
   const [order, afterOrder] = shuffle(seedRng(seed), players);
   let rng = afterOrder;
+  let deal: number[];
+  [deal, rng] = shuffle(
+    rng,
+    board.spaces.flatMap((s, i) => (isOwnable(s) ? [i] : [])),
+  );
   const decks = {} as GameState["decks"];
   for (const deck of Object.values(DECKS)) {
     let drawPile: number[];
@@ -61,7 +77,7 @@ export function createGame(
     decks[deck.id] = { drawPile };
   }
 
-  return {
+  const state: GameState = {
     schemaVersion: STATE_SCHEMA_VERSION,
     config,
     players: order.map((p) => ({
@@ -79,14 +95,34 @@ export function createGame(
     sealed: board.spaces.map(() => false),
     decks,
     urn: 0,
-    turn: { playerIndex: 0, number: 1, doublesCount: 0, extraRoll: false, lastRoll: null },
+    turn: {
+      playerIndex: 0,
+      number: 1,
+      round: 1,
+      doublesCount: 0,
+      extraRoll: false,
+      lastRoll: null,
+    },
     phase: { kind: "awaitingRoll" },
     debts: [],
     auctionQueue: [],
     trades: [],
     nextTradeId: 1,
+    eliminationOrder: [],
+    finalRound: null,
     rng,
   };
+
+  // Deal starting properties round-robin; each player pays the printed price.
+  for (let i = 0; i < config.startingProperties * state.players.length; i++) {
+    const space = deal[i];
+    const player = state.players[i % state.players.length];
+    const s = space === undefined ? undefined : board.spaces[space];
+    if (space === undefined || !player || !s || !isOwnable(s)) break;
+    state.owners[space] = player.id;
+    player.cash -= s.price;
+  }
+  return state;
 }
 
 /**
@@ -105,6 +141,89 @@ export function applyAction(
   // State is plain JSON by contract, so a JSON round-trip is a faithful deep copy.
   const game = new Game(JSON.parse(JSON.stringify(state)) as GameState, options);
   game.dispatch(playerId, action);
+  return { ok: true, state: game.state, events: game.events };
+}
+
+/**
+ * Auto-plays whoever is holding the game up when their decision timer runs out.
+ * Only safe defaults: roll, pass on purchases and auctions, end the turn, and
+ * raise owed funds by selling buildings, then sealing; never trades.
+ */
+export function applyTimeout(state: GameState): ApplyResult {
+  if (state.phase.kind === "gameOver") {
+    return { ok: false, error: { code: "game_over", message: "The game is over" } };
+  }
+  let current = state;
+  const events: GameEvent[] = [];
+  const timedOut = new Set<PlayerId>();
+  const step = (playerId: PlayerId, action: Action) => {
+    const result = applyAction(current, playerId, action);
+    if (!result.ok) {
+      throw new Error(`timeout action ${action.type} failed: ${result.error.message}`);
+    }
+    current = result.state;
+    events.push(...result.events);
+    timedOut.add(playerId);
+  };
+
+  const { phase } = current;
+  switch (phase.kind) {
+    case "auction":
+      for (const bidder of phase.bidders) {
+        const live = current.phase;
+        if (live.kind !== "auction" || live.space !== phase.space) break;
+        if (bidder !== live.highBidder) step(bidder, { type: "passAuction" });
+      }
+      break;
+    case "raisingFunds": {
+      const debtor = current.debts[0]?.debtor;
+      if (!debtor) throw new Error("raising funds without a debt");
+      while (current.phase.kind === "raisingFunds" && current.debts[0]?.debtor === debtor) {
+        const legal = getLegalActions(current, debtor);
+        const pick =
+          legal.find((a) => a.type === "payDebt") ??
+          legal.find((a) => a.type === "sellBuilding") ??
+          legal.find((a) => a.type === "seal") ??
+          legal.find((a) => a.type === "declareBankruptcy");
+        if (!pick) throw new Error("debtor has no way to settle");
+        step(debtor, pick);
+      }
+      break;
+    }
+    case "awaitingRoll":
+      step(currentPlayer(current).id, { type: "roll" });
+      break;
+    case "awaitingBuy":
+      step(currentPlayer(current).id, { type: "decline" });
+      break;
+    case "awaitingEndTurn":
+      step(currentPlayer(current).id, { type: "endTurn" });
+      break;
+  }
+  return {
+    ok: true,
+    state: current,
+    events: [{ type: "timedOut", playerIds: [...timedOut] }, ...events],
+  };
+}
+
+/** The time limit expired: play continues until the current round is complete. */
+export function startFinalRound(state: GameState): ApplyResult {
+  if (state.phase.kind === "gameOver") {
+    return { ok: false, error: { code: "game_over", message: "The game is over" } };
+  }
+  const next = JSON.parse(JSON.stringify(state)) as GameState;
+  next.finalRound = next.turn.round;
+  return { ok: true, state: next, events: [{ type: "finalRound", round: next.turn.round }] };
+}
+
+/** The host ends the game now; standings are by net worth. */
+export function endEarly(state: GameState): ApplyResult {
+  if (state.phase.kind === "gameOver") {
+    return { ok: false, error: { code: "game_over", message: "The game is over" } };
+  }
+  const game = new Game(JSON.parse(JSON.stringify(state)) as GameState, {});
+  game.endGame("endedEarly");
   return { ok: true, state: game.state, events: game.events };
 }
 
@@ -309,14 +428,24 @@ class Game {
   }
 
   private passTurn(): void {
-    const { players, turn } = this.state;
+    const { players, turn, config, finalRound } = this.state;
     let next = turn.playerIndex;
     do {
       next = (next + 1) % players.length;
     } while (players[next]?.bankrupt);
+    const round = next <= turn.playerIndex ? turn.round + 1 : turn.round;
+    if (config.roundLimit !== null && round > config.roundLimit) {
+      this.endGame("roundLimit");
+      return;
+    }
+    if (finalRound !== null && round > finalRound) {
+      this.endGame("timeLimit");
+      return;
+    }
     this.state.turn = {
       playerIndex: next,
       number: turn.number + 1,
+      round,
       doublesCount: 0,
       extraRoll: false,
       lastRoll: turn.lastRoll,
@@ -482,7 +611,10 @@ class Game {
     const space = this.board.spaces[index];
     if (space?.kind !== "property") throw new Error(`cannot build on ${index}`);
     this.transfer(p.id, "bank", space.buildCost, "building");
-    this.state.buildings[index] = (this.state.buildings[index] ?? 0) + 1;
+    this.state.buildings[index] = nextBuildingLevel(
+      this.state.config,
+      this.state.buildings[index] ?? 0,
+    );
     this.emit({
       type: "built",
       playerId: p.id,
@@ -498,7 +630,8 @@ class Game {
     const after = levelAfterSale(this.state, this.board, index);
     this.state.buildings[index] = after;
     // Buildings sell back to the bank at half their cost.
-    this.transfer("bank", p.id, Math.floor(((before - after) * space.buildCost) / 2), "building");
+    const levels = buildingRank(this.state.config, before) - buildingRank(this.state.config, after);
+    this.transfer("bank", p.id, Math.floor((levels * space.buildCost) / 2), "building");
     this.emit({ type: "soldBuilding", playerId: p.id, space: index, buildings: after });
   }
 
@@ -719,7 +852,8 @@ class Game {
       const space = this.board.spaces[i];
       if (buildings > 0 && heir && space?.kind === "property") {
         // Buildings are sold back to the bank at half price; the proceeds go to the creditor.
-        this.transfer("bank", p.id, Math.floor((space.buildCost * buildings) / 2), "bankruptcy");
+        const levels = buildingRank(this.state.config, buildings);
+        this.transfer("bank", p.id, Math.floor((space.buildCost * levels) / 2), "bankruptcy");
       }
       this.state.buildings[i] = 0;
       if (heir) {
@@ -740,16 +874,26 @@ class Game {
     p.inJail = false;
     p.jailAttempts = 0;
     p.bankrupt = true;
+    this.state.eliminationOrder.push(p.id);
     this.state.debts = this.state.debts.filter((d) => d.debtor !== p.id && d.creditor !== p.id);
     this.emit({ type: "bankrupt", playerId: p.id, creditor });
 
-    const remaining = activePlayers(this.state);
-    if (remaining.length === 1 && remaining[0]) {
-      this.state.debts = [];
-      this.state.auctionQueue = [];
-      this.state.phase = { kind: "gameOver", winnerId: remaining[0].id };
-      this.emit({ type: "gameOver", winnerId: remaining[0].id });
+    const limit = this.state.config.bankruptciesToEnd;
+    if (activePlayers(this.state).length === 1) {
+      this.endGame("lastStanding");
+    } else if (limit !== null && this.state.eliminationOrder.length >= limit) {
+      this.endGame("bankruptcies");
     }
+  }
+
+  endGame(reason: GameOverReason): void {
+    const standings = computeStandings(this.state);
+    const winner = standings[0];
+    if (!winner) throw new Error("no players to rank");
+    this.state.debts = [];
+    this.state.auctionQueue = [];
+    this.state.phase = { kind: "gameOver", winnerId: winner.playerId, reason, standings };
+    this.emit({ type: "gameOver", winnerId: winner.playerId, reason });
   }
 
   // ---------- Trades ----------

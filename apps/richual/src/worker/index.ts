@@ -26,6 +26,8 @@ const errorStatus: Record<ErrorCode, ContentfulStatusCode> = {
   game_in_progress: 409,
   stale: 409,
   rejected: 422,
+  paused: 409,
+  rate_limited: 429,
   protocol_mismatch: 426,
   internal: 500,
 };

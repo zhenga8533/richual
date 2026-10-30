@@ -31,6 +31,8 @@ type ConnectionState = {
   log: LoggedEvent[];
   /** Id of the action awaiting acknowledgement; further actions wait for it. */
   pendingActionId: string | null;
+  /** Server clock minus local clock, so deadlines display correctly on skewed machines. */
+  clockOffset: number;
 };
 
 export const useConnection = create<ConnectionState>(() => ({
@@ -41,7 +43,11 @@ export const useConnection = create<ConnectionState>(() => ({
   notice: null,
   log: [],
   pendingActionId: null,
+  clockOffset: 0,
 }));
+
+/** The current time on the server's clock. */
+export const serverNow = () => Date.now() + useConnection.getState().clockOffset;
 
 const KEEPALIVE_MS = 30_000;
 const MAX_BACKOFF_MS = 10_000;
@@ -97,13 +103,18 @@ function handleMessage(msg: ServerMessage): void {
         status: "open",
         playerId: msg.playerId,
         lobby: msg.lobby,
+        clockOffset: msg.lobby.serverNow - Date.now(),
         error: null,
         // Anything in flight before a reconnect is reflected in this snapshot.
         pendingActionId: null,
       });
       break;
     case "lobby":
-      useConnection.setState({ lobby: msg.lobby, log: appendEvents(msg.events) });
+      useConnection.setState({
+        lobby: msg.lobby,
+        log: appendEvents(msg.events),
+        clockOffset: msg.lobby.serverNow - Date.now(),
+      });
       break;
     case "ack":
       if (useConnection.getState().pendingActionId === msg.clientActionId) {

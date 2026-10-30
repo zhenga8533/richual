@@ -1,10 +1,57 @@
 import { HEROES, type HeroId } from "@richual/engine";
-import { type LobbySettings, type LobbySnapshot, MAX_PLAYERS } from "@richual/protocol";
+import {
+  type LobbySettings,
+  type LobbySnapshot,
+  MAX_PLAYERS,
+  TURN_TIMER_OPTIONS,
+} from "@richual/protocol";
 import { send, useConnection } from "../connection";
 import { initials, SOULS, seatColor } from "../theme";
+import { ChatPanel } from "./ChatPanel";
 import { heroLabel } from "./heroLabel";
 
 const STARTING_CASH_OPTIONS = [1000, 1500, 2000, 2500];
+
+type Limit = LobbySettings["limit"];
+const LIMIT_OPTIONS: { label: string; limit: Limit }[] = [
+  { label: "Until one player remains", limit: { kind: "none" } },
+  ...[10, 15, 20, 30].map((rounds) => ({
+    label: `${rounds} rounds`,
+    limit: { kind: "rounds", rounds } as Limit,
+  })),
+  ...[30, 45, 60, 90].map((minutes) => ({
+    label: `${minutes} minutes of play`,
+    limit: { kind: "minutes", minutes } as Limit,
+  })),
+];
+const limitKey = (limit: Limit) =>
+  limit.kind === "none"
+    ? "none"
+    : limit.kind === "rounds"
+      ? `r${limit.rounds}`
+      : `m${limit.minutes}`;
+
+/** Picking a mode applies its recommended house rules and length; the host can still adjust them. */
+const MODE_PRESETS: Record<LobbySettings["mode"], Partial<LobbySettings>> = {
+  classic: {
+    mode: "classic",
+    doubleOnExactGo: true,
+    freeParkingJackpot: true,
+    limit: { kind: "none" },
+  },
+  quick: {
+    mode: "quick",
+    doubleOnExactGo: false,
+    freeParkingJackpot: false,
+    limit: { kind: "rounds", rounds: 20 },
+  },
+};
+
+const MODE_NOTES: Record<LobbySettings["mode"], string> = {
+  classic: "Play until everyone else is bankrupt.",
+  quick:
+    "Two random properties each to start, Walkers after three Guardians, and the game is scored at the second bankruptcy.",
+};
 
 export function Setup({ lobby }: { lobby: LobbySnapshot }) {
   const { playerId } = useConnection();
@@ -76,6 +123,64 @@ export function Setup({ lobby }: { lobby: LobbySnapshot }) {
           Rules
         </h2>
         <label className="flex items-center justify-between gap-3 text-sm">
+          Mode
+          <select
+            className="input w-auto py-1"
+            value={lobby.settings.mode}
+            disabled={!isHost}
+            onChange={(e) => updateSettings(MODE_PRESETS[e.target.value as LobbySettings["mode"]])}
+          >
+            <option value="classic">Classic</option>
+            <option value="quick">Quick</option>
+          </select>
+        </label>
+        <p className="-mt-1 text-xs text-parchment-dim">{MODE_NOTES[lobby.settings.mode]}</p>
+        <label className="flex items-center justify-between gap-3 text-sm">
+          Game length
+          <select
+            className="input w-auto py-1"
+            value={limitKey(lobby.settings.limit)}
+            disabled={!isHost}
+            onChange={(e) => {
+              const option = LIMIT_OPTIONS.find((o) => limitKey(o.limit) === e.target.value);
+              if (option) updateSettings({ limit: option.limit });
+            }}
+          >
+            {LIMIT_OPTIONS.map((o) => (
+              <option key={limitKey(o.limit)} value={limitKey(o.limit)}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        {lobby.settings.limit.kind !== "none" && (
+          <p className="-mt-1 text-xs text-parchment-dim">
+            When the limit is reached the current round finishes, then the richest player wins.
+            Paused time does not count.
+          </p>
+        )}
+        <label className="flex items-center justify-between gap-3 text-sm">
+          Turn timer
+          <select
+            className="input w-auto py-1"
+            value={lobby.settings.turnTimerSeconds}
+            disabled={!isHost}
+            onChange={(e) => updateSettings({ turnTimerSeconds: Number(e.target.value) })}
+          >
+            {TURN_TIMER_OPTIONS.map((sec) => (
+              <option key={sec} value={sec}>
+                {sec === 0 ? "Off" : `${sec} seconds`}
+              </option>
+            ))}
+          </select>
+        </label>
+        {lobby.settings.turnTimerSeconds > 0 && (
+          <p className="-mt-1 text-xs text-parchment-dim">
+            Idle players are auto-played safely: roll, pass, end turn, and raise owed souls. Never
+            trades.
+          </p>
+        )}
+        <label className="flex items-center justify-between gap-3 text-sm">
           Starting souls
           <select
             className="input w-auto py-1"
@@ -129,6 +234,7 @@ export function Setup({ lobby }: { lobby: LobbySnapshot }) {
       ) : (
         <p className="text-sm text-parchment-dim">Waiting for the host to start the game…</p>
       )}
+      <ChatPanel lobby={lobby} />
     </div>
   );
 }

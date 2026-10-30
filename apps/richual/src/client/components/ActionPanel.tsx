@@ -3,6 +3,7 @@ import type { LobbySnapshot } from "@richual/protocol";
 import { type FormEvent, useState } from "react";
 import { sendAction, useConnection } from "../connection";
 import { SOULS } from "../theme";
+import { Countdown } from "./Countdown";
 
 type Props = { lobby: LobbySnapshot; game: PublicGameState };
 
@@ -26,14 +27,33 @@ function useNames(lobby: LobbySnapshot) {
 
 /** What the viewer can do right now: the turn, an auction, or raising funds. */
 export function ActionPanel({ lobby, game }: Props) {
-  switch (game.phase.kind) {
-    case "auction":
-      return <AuctionPanel lobby={lobby} game={game} />;
-    case "raisingFunds":
-      return <DebtPanel lobby={lobby} game={game} />;
-    default:
-      return <TurnPanel lobby={lobby} game={game} />;
+  if (lobby.paused) {
+    return (
+      <section className="panel p-4" aria-label="Your actions">
+        <p className="text-sm text-parchment-dim" aria-live="polite">
+          The host has paused the game. You can still offer and decline trades.
+        </p>
+      </section>
+    );
   }
+  const panel =
+    game.phase.kind === "auction" ? (
+      <AuctionPanel lobby={lobby} game={game} />
+    ) : game.phase.kind === "raisingFunds" ? (
+      <DebtPanel lobby={lobby} game={game} />
+    ) : (
+      <TurnPanel lobby={lobby} game={game} />
+    );
+  return (
+    <div className="relative">
+      {panel}
+      {lobby.actionDeadline !== null && (
+        <div className="absolute top-3 right-4">
+          <Countdown deadline={lobby.actionDeadline} />
+        </div>
+      )}
+    </div>
+  );
 }
 
 function flowLabel(action: Action, game: PublicGameState): string {

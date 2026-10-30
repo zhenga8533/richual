@@ -1,6 +1,6 @@
 import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { CloseCode, type LobbySnapshot } from "@richual/protocol";
+import { CloseCode, LobbySettings, type LobbySnapshot } from "@richual/protocol";
 import { describe, expect, it } from "vitest";
 import {
   connect,
@@ -66,13 +66,13 @@ describe("lobby setup", () => {
 
   it("only lets the host change settings", async () => {
     const { host, guest } = await twoPlayerLobby();
-    const settings = {
+    const settings = LobbySettings.parse({
       startingCash: 2000,
       doubleOnExactGo: false,
       freeParkingJackpot: false,
       auctions: false,
       evenBuilding: false,
-    };
+    });
     guest.send({ type: "updateSettings", settings });
     expect(await guest.until("error")).toMatchObject({ error: "forbidden" });
 
@@ -116,13 +116,13 @@ describe("starting a game", () => {
     const setup = await twoPlayerLobby();
     setup.host.send({
       type: "updateSettings",
-      settings: {
+      settings: LobbySettings.parse({
         startingCash: 2000,
         doubleOnExactGo: true,
         freeParkingJackpot: true,
         auctions: true,
         evenBuilding: true,
-      },
+      }),
     });
     await setup.guest.until("lobby");
     setup.host.send({ type: "startGame" });

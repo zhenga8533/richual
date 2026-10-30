@@ -42,7 +42,7 @@ test("two players create, join, start and play in sync", async ({ browser }) => 
   await host.getByRole("button", { name: "Begin the ritual" }).click();
 
   const [current, other] = await byTurn(host, guest);
-  await expect(current).toHaveTitle(/Your turn/);
+  await expect(current).toHaveTitle(/Your move/);
   await current.getByRole("button", { name: "Roll dice" }).click();
 
   // The roll reaches the other player's log.
@@ -108,4 +108,28 @@ test("declining a property starts an auction both players see", async ({ browser
     await expect.poll(() => logLines.count()).toBeGreaterThan(before);
   }
   throw new Error("no unowned property was landed on in 40 steps");
+});
+
+test("the host can pause, resume and end a game with standings", async ({ browser }) => {
+  const host = await newPlayer(browser);
+  const guest = await newPlayer(browser);
+  const url = await createLobby(host, "Host");
+  await joinLobby(guest, url, "Guest");
+  await host.getByRole("button", { name: "Begin the ritual" }).click();
+  await byTurn(host, guest);
+
+  await expect(guest.getByRole("button", { name: "Pause" })).toHaveCount(0);
+  await host.getByRole("button", { name: "Pause" }).click();
+  await expect(guest.getByRole("status").filter({ hasText: "Paused" })).toBeVisible();
+  await expect(guest.getByText("The host has paused the game")).toBeVisible();
+
+  await host.getByRole("button", { name: "Resume" }).click();
+  await expect(guest.getByRole("status").filter({ hasText: "Paused" })).toHaveCount(0);
+
+  await host.getByRole("button", { name: "End game" }).click();
+  await host.getByRole("button", { name: "End and score now" }).click();
+  for (const page of [host, guest]) {
+    await expect(page.getByText("Provisional", { exact: true })).toBeVisible();
+    await expect(page.getByRole("table", { name: "Final standings" })).toBeVisible();
+  }
 });

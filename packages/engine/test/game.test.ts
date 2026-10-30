@@ -341,8 +341,8 @@ describe("bankruptcy", () => {
     expect(player(state, "a")).toMatchObject({ bankrupt: true, cash: 0, getOutCards: [] });
     expect(player(state, "b")).toMatchObject({ cash: 1600, getOutCards: ["coven"] });
     expect(state.owners[1]).toBe("b");
-    expect(state.phase).toEqual({ kind: "gameOver", winnerId: "b" });
-    expect(events.at(-1)).toEqual({ type: "gameOver", winnerId: "b" });
+    expect(state.phase).toMatchObject({ kind: "gameOver", winnerId: "b", reason: "lastStanding" });
+    expect(events.at(-1)).toEqual({ type: "gameOver", winnerId: "b", reason: "lastStanding" });
   });
 
   it("returns assets to the bank on an unpayable tax and skips the player afterwards", () => {
@@ -383,7 +383,7 @@ describe("validation", () => {
 
   it("rejects everything once the game is over", () => {
     const s = newGame();
-    s.phase = { kind: "gameOver", winnerId: "a" };
+    s.phase = { kind: "gameOver", winnerId: "a", reason: "endedEarly", standings: [] };
     expect(applyAction(s, "a", { type: "roll" })).toMatchObject({
       ok: false,
       error: { code: "game_over" },

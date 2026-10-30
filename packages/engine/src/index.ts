@@ -7,6 +7,7 @@ export * from "./legal";
 export * from "./migrations";
 export * from "./rng";
 export * from "./rules";
+export * from "./scoring";
 export * from "./simulate";
 export * from "./state";
 export * from "./view";

@@ -26,6 +26,16 @@ export function activePlayers(state: Pick<GameState, "players">): PlayerState[] 
   return state.players.filter((p) => !p.bankrupt);
 }
 
+/** Building levels below a Walker, plus one for the Walker itself. */
+export function buildingRank(config: { guardiansPerWalker: number }, level: number): number {
+  return level === WALKER ? config.guardiansPerWalker + 1 : level;
+}
+
+/** The level after building once more: Guardians up to the limit, then a Walker. */
+export function nextBuildingLevel(config: { guardiansPerWalker: number }, level: number): number {
+  return level >= config.guardiansPerWalker ? WALKER : level + 1;
+}
+
 export function mortgageValue(board: BoardDefinition, space: number): number {
   const s = board.spaces[space];
   return s && isOwnable(s) ? s.price / 2 : 0;
@@ -90,13 +100,13 @@ export function canBuild(
   const group = groupIndices(board, s.group);
   if (group.some((i) => state.sealed[i])) return false;
   const level = state.buildings[space] ?? 0;
-  if (level >= WALKER || player.cash < s.buildCost) return false;
-  if (state.config.evenBuilding && level > Math.min(...group.map((i) => state.buildings[i] ?? 0))) {
-    return false;
-  }
+  if (level === WALKER || player.cash < s.buildCost) return false;
+  const rank = (i: number) => buildingRank(state.config, state.buildings[i] ?? 0);
+  if (state.config.evenBuilding && rank(space) > Math.min(...group.map(rank))) return false;
   if (state.config.limitedBuildings) {
     const inUse = buildingsInUse(state);
-    if (level + 1 === WALKER) return inUse.walkers < board.walkerSupply;
+    if (nextBuildingLevel(state.config, level) === WALKER)
+      return inUse.walkers < board.walkerSupply;
     return inUse.guardians < board.guardianSupply;
   }
   return true;
@@ -113,22 +123,23 @@ export function canSellBuilding(
   const level = state.buildings[space] ?? 0;
   if (level === 0) return false;
   if (state.config.evenBuilding) {
-    const group = groupIndices(board, s.group);
-    return level >= Math.max(...group.map((i) => state.buildings[i] ?? 0));
+    const rank = (i: number) => buildingRank(state.config, state.buildings[i] ?? 0);
+    return rank(space) >= Math.max(...groupIndices(board, s.group).map(rank));
   }
   return true;
 }
 
 /**
  * The building level after selling one level. A Walker normally breaks down into
- * four Guardians, but only as many as the bank still has.
+ * a full row of Guardians, but only as many as the bank still has.
  */
 export function levelAfterSale(state: EconomyView, board: BoardDefinition, space: number): number {
   const level = state.buildings[space] ?? 0;
+  const full = state.config.guardiansPerWalker;
   if (level !== WALKER) return level - 1;
-  if (!state.config.limitedBuildings) return WALKER - 1;
+  if (!state.config.limitedBuildings) return full;
   const available = board.guardianSupply - buildingsInUse(state).guardians;
-  return Math.max(0, Math.min(WALKER - 1, available));
+  return Math.max(0, Math.min(full, available));
 }
 
 export function canSeal(
@@ -165,7 +176,9 @@ export function liquidationValue(
   state.owners.forEach((owner, i) => {
     if (owner !== playerId) return;
     const s = board.spaces[i];
-    if (s?.kind === "property") total += Math.floor(((state.buildings[i] ?? 0) * s.buildCost) / 2);
+    if (s?.kind === "property") {
+      total += Math.floor((buildingRank(state.config, state.buildings[i] ?? 0) * s.buildCost) / 2);
+    }
     if (!state.sealed[i]) total += mortgageValue(board, i);
   });
   return total;

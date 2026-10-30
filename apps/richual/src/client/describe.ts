@@ -83,7 +83,15 @@ export function describeEvent(
     case "bankrupt":
       return `${name(event.playerId)} is soul-bankrupt${event.creditor === "bank" ? "" : ` to ${name(event.creditor)}`}`;
     case "gameOver":
-      return `${name(event.winnerId)} completes the ritual and wins!`;
+      return event.reason === "endedEarly"
+        ? `The host ended the game. ${name(event.winnerId)} leads on net worth.`
+        : `${name(event.winnerId)} completes the ritual and wins!`;
+    case "timedOut":
+      return event.playerIds.length > 0
+        ? `Time ran out for ${event.playerIds.map(name).join(", ")}; auto-played`
+        : null;
+    case "finalRound":
+      return `Time is up: round ${event.round} is the final round`;
     case "transfer":
       switch (event.reason) {
         case "salary":

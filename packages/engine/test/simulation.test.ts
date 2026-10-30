@@ -2,7 +2,7 @@ import fc from "fast-check";
 import { afterAll, describe, expect, it } from "vitest";
 import { getBoard, groupIndices, isOwnable } from "../src/board";
 import { DECKS, type DeckId } from "../src/cards";
-import { CLASSIC_RULES, type RuleConfig } from "../src/config";
+import { CLASSIC_RULES, QUICK_RULES, type RuleConfig } from "../src/config";
 import { getLegalActions } from "../src/legal";
 import { activePlayers, buildingsInUse, currentPlayer, tradeProblem } from "../src/rules";
 import { replay, type SimulationStep, simulateGame } from "../src/simulate";
@@ -83,10 +83,18 @@ function checkInvariants({ before, after, events }: SimulationStep): void {
 
   const active = activePlayers(after);
   if (after.phase.kind === "gameOver") {
+    const { standings, winnerId, reason } = after.phase;
+    check(standings.length === after.players.length, "every player is ranked");
+    check(standings[0]?.playerId === winnerId, "the winner ranks first");
     check(
-      active.length === 1 && active[0]?.id === after.phase.winnerId,
-      "winner is the last player",
+      standings.every((st, i) => st.rank === i + 1),
+      "ranks are consecutive",
     );
+    if (reason === "lastStanding") {
+      check(active.length === 1 && active[0]?.id === winnerId, "winner is the last player");
+    } else {
+      check(active.length >= 1, "a scored game has survivors");
+    }
     return;
   }
   check(active.length >= 2, "an ongoing game has at least two players");
@@ -150,6 +158,10 @@ describe("simulation", () => {
           auctions: fc.boolean(),
           evenBuilding: fc.boolean(),
           limitedBuildings: fc.boolean(),
+          guardiansPerWalker: fc.constantFrom(3, 4),
+          startingProperties: fc.constantFrom(0, 2),
+          bankruptciesToEnd: fc.constantFrom(null, 1, 2),
+          roundLimit: fc.constantFrom(null, 5, 20),
         }),
         (seed, n, toggles) => {
           const rules: RuleConfig = { ...CLASSIC_RULES, ...toggles };
@@ -175,7 +187,7 @@ describe("simulation", () => {
           seed,
           maxTurns: 200,
         });
-        expect(replay(result.initial, result.actions)).toEqual(result.final);
+        expect(replay(result.initial, result.moves)).toEqual(result.final);
       }),
       { numRuns: 20 },
     );
@@ -188,27 +200,27 @@ describe("simulation", () => {
       console.table(rows);
     });
 
-    for (const n of [2, 4, 6]) {
-      it(`plays ${n}-player classic games`, () => {
-        const maxTurns = 1000;
-        const results: { finished: boolean; turns: number }[] = [];
-        for (let seed = 0; seed < 40; seed++) {
-          results.push(simulateGame({ players: players(n), rules: CLASSIC_RULES, seed, maxTurns }));
-        }
-        const finished = results.filter((r) => r.finished);
-        const turns = finished.map((r) => r.turns).sort((a, b) => a - b);
-        rows.push({
-          players: n,
-          games: results.length,
-          maxTurns,
-          finished: `${finished.length}/${results.length}`,
-          medianTurns: turns[Math.floor(turns.length / 2)] ?? "-",
-          medianRounds: turns.length
-            ? Math.round((turns[Math.floor(turns.length / 2)] ?? 0) / n)
-            : "-",
-        });
-        expect(results.length).toBe(40);
-      }, 60_000);
+    const modes = { classic: CLASSIC_RULES, quick: QUICK_RULES };
+    for (const [mode, rules] of Object.entries(modes)) {
+      for (const n of [2, 4, 6]) {
+        it(`plays ${n}-player ${mode} games`, () => {
+          const maxTurns = 1000;
+          const results = Array.from({ length: 40 }, (_, seed) =>
+            simulateGame({ players: players(n), rules, seed, maxTurns }),
+          );
+          const finished = results.filter((r) => r.finished);
+          const median = (xs: number[]) =>
+            xs.sort((a, b) => a - b)[Math.floor(xs.length / 2)] ?? "-";
+          rows.push({
+            mode,
+            players: n,
+            finished: `${finished.length}/${results.length}`,
+            medianRounds: median(finished.map((r) => r.final.turn.round)),
+            medianMoves: median(finished.map((r) => r.moves.length)),
+          });
+          expect(results.length).toBe(40);
+        }, 120_000);
+      }
     }
   });
 });
