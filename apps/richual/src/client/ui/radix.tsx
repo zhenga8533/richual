@@ -105,6 +105,18 @@ export function MenuContent({ className, ...props }: ComponentProps<typeof Dropd
   );
 }
 
+export function MenuItem({ className, ...props }: ComponentProps<typeof DropdownMenu.Item>) {
+  return (
+    <DropdownMenu.Item
+      className={cn(
+        "flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none select-none data-[highlighted]:bg-surface-2 [&_svg]:size-4 [&_svg]:text-muted",
+        className,
+      )}
+      {...props}
+    />
+  );
+}
+
 export function MenuRadioItem({
   className,
   children,

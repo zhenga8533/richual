@@ -54,7 +54,7 @@ describe("WebSocket sessions", () => {
     expect(msg).toMatchObject({ type: "welcome", playerId: host.playerId });
     if (msg.type !== "welcome") throw new Error("unreachable");
     expect(msg.lobby.players).toEqual([
-      { id: host.playerId, name: "Haze", seat: 0, hero: "abrams", connected: true },
+      { id: host.playerId, name: "Haze", seat: 0, hero: "abrams", connected: true, bot: false },
     ]);
     ws.close();
   });

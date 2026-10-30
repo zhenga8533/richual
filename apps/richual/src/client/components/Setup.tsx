@@ -5,6 +5,7 @@ import {
   MAX_PLAYERS,
   TURN_TIMER_OPTIONS,
 } from "@richual/protocol";
+import { Bot } from "lucide-react";
 import type { ReactNode } from "react";
 import { send, useConnection } from "../connection";
 import { SOULS } from "../theme";
@@ -16,6 +17,7 @@ import { Switch } from "../ui/radix";
 import { ChatPanel } from "./ChatPanel";
 import { heroLabel } from "./heroLabel";
 import { PlayerAvatar } from "./PlayerAvatar";
+import { PlayerMenu } from "./PlayerMenu";
 
 const STARTING_CASH_OPTIONS = [1000, 1500, 2000, 2500];
 
@@ -91,8 +93,11 @@ export function Setup({ lobby }: { lobby: LobbySnapshot }) {
                       {p.name}
                       {p.id === playerId && <Badge>You</Badge>}
                       {p.id === lobby.hostId && <Badge variant="accent">Host</Badge>}
+                      {p.bot && <Badge>Bot</Badge>}
                     </p>
-                    <p className="text-xs text-muted">{p.connected ? "Online" : "Offline"}</p>
+                    <p className="text-xs text-muted">
+                      {p.bot ? "Plays automatically" : p.connected ? "Online" : "Offline"}
+                    </p>
                   </div>
                   {p.id === playerId ? (
                     <label className="text-sm">
@@ -116,9 +121,21 @@ export function Setup({ lobby }: { lobby: LobbySnapshot }) {
                   ) : (
                     <span className="text-sm text-muted">{heroLabel(p.hero, "No hero")}</span>
                   )}
+                  <PlayerMenu lobby={lobby} player={p} />
                 </li>
               ))}
             </ul>
+            {isHost && lobby.players.length < MAX_PLAYERS && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-2"
+                onClick={() => send({ type: "addBot" })}
+              >
+                <Bot />
+                Add a bot
+              </Button>
+            )}
           </CardContent>
         </Card>
         <ChatPanel lobby={lobby} />

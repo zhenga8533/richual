@@ -3,7 +3,7 @@ import { HERO_IDS, MODES } from "@richual/engine";
 import { z } from "zod";
 
 /** Bumped on any breaking change to the wire format; clients on another version must reload. */
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 
 export const MAX_MESSAGE_BYTES = 16 * 1024;
 export const MAX_PLAYERS = 6;
@@ -31,6 +31,12 @@ export type CreateLobbyRequest = z.infer<typeof CreateLobbyRequest>;
 
 export const JoinLobbyRequest = z.object({ name: PlayerName });
 export type JoinLobbyRequest = z.infer<typeof JoinLobbyRequest>;
+
+/** A one-time code, shown on one device, that moves that player's seat to another. */
+export const SeatCode = LobbyCode;
+export const ClaimSeatRequest = z.object({ seatCode: SeatCode });
+export type ClaimSeatRequest = z.infer<typeof ClaimSeatRequest>;
+export const SEAT_CODE_TTL_MS = 10 * 60 * 1000;
 
 export const SessionResponse = z.object({
   code: z.string(),
@@ -122,6 +128,8 @@ export const LobbyPlayer = z.object({
   seat: z.number().int(),
   hero: HeroId.nullable(),
   connected: z.boolean(),
+  /** Played by the server; never connects. */
+  bot: z.boolean(),
 });
 export type LobbyPlayer = z.infer<typeof LobbyPlayer>;
 
@@ -220,6 +228,12 @@ export const ClientMessage = z.discriminatedUnion("type", [
   z.object({ type: z.literal("resume") }),
   z.object({ type: z.literal("endGame") }),
   z.object({ type: z.literal("chat"), text: z.string().trim().min(1).max(MAX_CHAT_LENGTH) }),
+  z.object({ type: z.literal("addBot") }),
+  z.object({ type: z.literal("removePlayer"), playerId: z.string().max(64) }),
+  z.object({ type: z.literal("replaceWithBot"), playerId: z.string().max(64) }),
+  z.object({ type: z.literal("setHost"), playerId: z.string().max(64) }),
+  z.object({ type: z.literal("rematch") }),
+  z.object({ type: z.literal("createSeatCode") }),
   z.object({
     type: z.literal("action"),
     /** Client-generated id; resending the same id never applies the action twice. */
@@ -245,6 +259,8 @@ export const ServerMessage = z.discriminatedUnion("type", [
     events: z.array(z.custom<GameEvent>((v) => typeof v === "object")),
   }),
   z.object({ type: z.literal("ack"), clientActionId: z.string() }),
+  /** Sent only to the player who asked for it. */
+  z.object({ type: z.literal("seatCode"), code: z.string(), expiresAt: z.number() }),
   z.object({
     type: z.literal("error"),
     error: ErrorCode,
@@ -262,4 +278,8 @@ export const CloseCode = {
   HelloTimeout: 4003,
   LobbyClosed: 4004,
   Replaced: 4005,
+  /** The host removed this player or handed their seat to a bot. */
+  Removed: 4006,
+  /** The player claimed their seat on another device. */
+  SeatMoved: 4007,
 } as const;

@@ -70,6 +70,12 @@ describe("lobby creation limits", () => {
       expect((await createAs(null)).status).toBe(201);
     }
   });
+
+  it("does not limit loopback addresses (wrangler dev)", async () => {
+    for (let i = 0; i < LIMITS.createLobby.limit + 2; i++) {
+      expect((await createAs("127.0.0.1")).status).toBe(201);
+    }
+  });
 });
 
 describe("join limits", () => {

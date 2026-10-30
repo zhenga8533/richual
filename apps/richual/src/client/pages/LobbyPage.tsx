@@ -1,11 +1,12 @@
 import type { SessionResponse } from "@richual/protocol";
 import { Check, Link2 } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
-import { joinLobby } from "../api";
+import { claimSeat, joinLobby } from "../api";
 import { GameView } from "../components/GameView";
+import { SeatTransfer } from "../components/SeatTransfer";
 import { Setup } from "../components/Setup";
 import { type ConnectionStatus, connect, useConnection } from "../connection";
-import { navigate } from "../router";
+import { navigate, seatCodeFromHash } from "../router";
 import { loadName, loadSession, saveName, saveSession } from "../session";
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
@@ -14,9 +15,47 @@ import { Input, Label } from "../ui/field";
 
 export function LobbyPage({ code }: { code: string }) {
   const [session, setSession] = useState(() => loadSession(code));
+  const [seatCode, setSeatCode] = useState(seatCodeFromHash);
+  const [claimError, setClaimError] = useState<string | null>(null);
 
-  if (!session) return <JoinForm code={code} onJoined={setSession} />;
-  return <Lobby session={session} />;
+  useEffect(() => {
+    if (!seatCode) return;
+    // The code is single-use; keep it out of history and bookmarks either way.
+    history.replaceState(null, "", location.pathname);
+    let cancelled = false;
+    claimSeat(code, seatCode)
+      .then((claimed) => {
+        if (cancelled) return;
+        saveSession(claimed);
+        setSession(claimed);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setClaimError(err instanceof Error ? err.message : "Could not move seat");
+      })
+      .finally(() => {
+        if (!cancelled) setSeatCode(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [code, seatCode]);
+
+  if (seatCode) {
+    return <p className="py-16 text-muted">Moving your seat to this device…</p>;
+  }
+  if (!session) {
+    return (
+      <>
+        {claimError && (
+          <p role="alert" className="mt-8 rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">
+            {claimError}
+          </p>
+        )}
+        <JoinForm code={code} onJoined={setSession} />
+      </>
+    );
+  }
+  return <Lobby key={session.token} session={session} />;
 }
 
 function JoinForm({
@@ -112,6 +151,7 @@ function Lobby({ session }: { session: SessionResponse }) {
             {copied ? <Check /> : <Link2 />}
             {copied ? "Copied!" : "Copy invite link"}
           </Button>
+          {status === "open" && <SeatTransfer code={session.code} />}
           <StatusDot status={status} />
         </div>
       )}

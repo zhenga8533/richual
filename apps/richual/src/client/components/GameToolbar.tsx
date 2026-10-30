@@ -23,6 +23,7 @@ import { Card } from "../ui/card";
 import { cn } from "../ui/cn";
 import { PopoverContent, PopoverRoot, PopoverTrigger, Switch } from "../ui/radix";
 import { formatDuration, useServerNow } from "./Countdown";
+import { SeatTransfer } from "./SeatTransfer";
 
 type Props = {
   lobby: LobbySnapshot;
@@ -129,6 +130,7 @@ export function GameToolbar({ lobby, game, notify, onNotifyChange, onShowShortcu
         >
           <Keyboard />
         </Button>
+        {playing && <SeatTransfer code={lobby.code} compact />}
         {isHost && playing && (
           <span className="ml-auto flex items-center gap-1">
             <Button

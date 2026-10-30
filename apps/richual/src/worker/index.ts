@@ -1,4 +1,5 @@
 import {
+  ClaimSeatRequest,
   CreateLobbyRequest,
   type ErrorCode,
   type ErrorResponse,
@@ -41,9 +42,12 @@ type LimitName = keyof typeof LIMITS;
  * exhausted, or null to go ahead. Requests without CF-Connecting-IP (local dev and
  * tests) are not limited; Cloudflare always sets it in production.
  */
+const LOOPBACK = new Set(["127.0.0.1", "::1"]);
+
 async function rateLimit(env: Env, request: Request, names: LimitName[]): Promise<Response | null> {
   const ip = request.headers.get("CF-Connecting-IP");
-  if (!ip) return null;
+  // Cloudflare's edge always sends a public address; loopback only comes from local dev and tests.
+  if (!ip || LOOPBACK.has(ip)) return null;
   const client = env.GATEKEEPER.getByName(`ip:${await sha256Hex(ip)}`);
   for (const name of names) {
     const { limit, windowMs } = LIMITS[name];
@@ -99,6 +103,19 @@ app.post("/api/lobbies/:code/join", async (c) => {
   if (limited) return limited;
 
   const result = await c.env.LOBBY.getByName(code.data).join(body.data.name);
+  if (!result.ok) return c.json(errorBody(result.error, result.message), errorStatus[result.error]);
+  return c.json(result.session, 201);
+});
+
+app.post("/api/lobbies/:code/claim", async (c) => {
+  const code = LobbyCode.safeParse(c.req.param("code"));
+  if (!code.success) return c.json(errorBody("not_found", "Lobby not found"), 404);
+  const body = ClaimSeatRequest.safeParse(await readJson(c.req.raw));
+  if (!body.success) return c.json(errorBody("bad_request", "That isn't a seat code"), 400);
+  const limited = await rateLimit(c.env, c.req.raw, ["claimSeat"]);
+  if (limited) return limited;
+
+  const result = await c.env.LOBBY.getByName(code.data).claimSeat(body.data.seatCode);
   if (!result.ok) return c.json(errorBody(result.error, result.message), errorStatus[result.error]);
   return c.json(result.session, 201);
 });

@@ -27,6 +27,7 @@ import { Chat } from "./ChatPanel";
 import { GameToolbar } from "./GameToolbar";
 import { heroLabel } from "./heroLabel";
 import { PlayerAvatar } from "./PlayerAvatar";
+import { PlayerMenu } from "./PlayerMenu";
 import { PropertyDetails } from "./PropertyDetails";
 import { TradesTab } from "./TradesTab";
 
@@ -228,7 +229,7 @@ function Players({
           const owned = game.owners.filter((o) => o === p.id).length;
           const isCurrent = p.id === current?.id && game.phase.kind !== "gameOver";
           return (
-            <li key={p.id}>
+            <li key={p.id} className="flex items-center gap-1">
               <button
                 type="button"
                 aria-pressed={pinned === p.id}
@@ -239,7 +240,7 @@ function Players({
                 onBlur={() => onPreview(null)}
                 onClick={() => onPin(p.id)}
                 className={cn(
-                  "flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-surface-2",
+                  "flex min-w-0 flex-1 items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-surface-2",
                   isCurrent && "bg-accent-soft hover:bg-accent-soft",
                   pinned === p.id && "ring-2 ring-accent ring-inset",
                   p.bankrupt && "opacity-50",
@@ -255,6 +256,7 @@ function Players({
                   <span className="flex items-center gap-1.5 truncate font-medium">
                     {p.name}
                     {p.id === playerId && <Badge>You</Badge>}
+                    {info?.bot && <Badge>Bot</Badge>}
                     {isCurrent && <Badge variant="accent">Turn</Badge>}
                   </span>
                   <span className="block truncate text-xs text-muted">
@@ -264,7 +266,7 @@ function Players({
                       p.inJail && "in the Lost Whisper",
                       p.getOutCards.length > 0 && `${p.getOutCards.length} escape card`,
                       p.bankrupt && "bankrupt",
-                      info && !info.connected && "offline",
+                      info && !info.connected && !info.bot && "offline",
                     ]
                       .filter(Boolean)
                       .join(" · ")}
@@ -274,6 +276,7 @@ function Players({
                   {p.cash} <span className="text-accent-text">{SOULS}</span>
                 </span>
               </button>
+              {info && !p.bankrupt && <PlayerMenu lobby={lobby} player={info} />}
             </li>
           );
         })}
