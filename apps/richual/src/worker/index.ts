@@ -1,5 +1,7 @@
 import {
+  CLIENT_ERROR_MAX_BYTES,
   ClaimSeatRequest,
+  ClientErrorReport,
   CreateLobbyRequest,
   type ErrorCode,
   type ErrorResponse,
@@ -118,6 +120,25 @@ app.post("/api/lobbies/:code/claim", async (c) => {
   const result = await c.env.LOBBY.getByName(code.data).claimSeat(body.data.seatCode);
   if (!result.ok) return c.json(errorBody(result.error, result.message), errorStatus[result.error]);
   return c.json(result.session, 201);
+});
+
+app.post("/api/client-errors", async (c) => {
+  const text = await c.req.text();
+  if (new TextEncoder().encode(text).byteLength > CLIENT_ERROR_MAX_BYTES) {
+    return c.json(errorBody("bad_request", "Report too large"), 413);
+  }
+  let json: unknown = null;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    // Falls through to the schema check below.
+  }
+  const report = ClientErrorReport.safeParse(json);
+  if (!report.success) return c.json(errorBody("bad_request", "Malformed report"), 400);
+  const limited = await rateLimit(c.env, c.req.raw, ["clientError"]);
+  if (limited) return limited;
+  console.error(JSON.stringify({ event: "clientError", ...report.data }));
+  return c.body(null, 204);
 });
 
 app.get("/api/lobbies/:code/ws", async (c) => {

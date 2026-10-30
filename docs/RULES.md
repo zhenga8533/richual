@@ -95,3 +95,10 @@ a 20-round limit.
   and sell or seal just enough to pay a debt. It never trades.
 - If the host is away for two minutes, hosting passes to the player who has been connected longest.
 - Reconnect any time from the same browser: your seat is kept.
+- To switch devices, choose **Continue on another device** and scan the QR code, or enter the
+  seat code on the Join tab. The code works once, within 10 minutes, and signs out the old device.
+- The **host** can add **bots** before the game, remove players before it starts, and make someone
+  else host. If someone has to leave mid-game, the host can hand their seat to a bot, which keeps
+  everything they own and plays on. Bots take a moment between moves so you can follow along, and
+  stop when the game is paused.
+- After a game, **Rematch** starts a new one with the same players and rules.

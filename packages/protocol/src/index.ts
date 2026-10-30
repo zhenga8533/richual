@@ -36,6 +36,18 @@ export type JoinLobbyRequest = z.infer<typeof JoinLobbyRequest>;
 export const SeatCode = LobbyCode;
 export const ClaimSeatRequest = z.object({ seatCode: SeatCode });
 export type ClaimSeatRequest = z.infer<typeof ClaimSeatRequest>;
+
+/** Reports at most this many bytes; anything larger is refused unread. */
+export const CLIENT_ERROR_MAX_BYTES = 4096;
+export const ClientErrorReport = z.object({
+  kind: z.enum(["render", "error", "rejection"]),
+  message: z.string().max(500),
+  stack: z.string().max(3000).optional(),
+  /** The page path only; lobby codes are fine to log, seat codes never reach it. */
+  path: z.string().max(200),
+  version: z.string().max(40),
+});
+export type ClientErrorReport = z.infer<typeof ClientErrorReport>;
 export const SEAT_CODE_TTL_MS = 10 * 60 * 1000;
 
 export const SessionResponse = z.object({

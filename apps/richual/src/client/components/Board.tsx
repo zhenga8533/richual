@@ -11,7 +11,7 @@ import {
   WALKER,
 } from "@richual/engine";
 import type { LobbyPlayer } from "@richual/protocol";
-import { type RefObject, useEffect, useRef, useState } from "react";
+import { type KeyboardEvent, type RefObject, useEffect, useRef, useState } from "react";
 import { shortName } from "../boardLabels";
 import { GROUP_COLORS, initials, SOULS, seatColor } from "../theme";
 import { cn } from "../ui/cn";
@@ -115,10 +115,19 @@ export function Board({
     };
   };
   const flashes = usePurchaseFlashes(game.owners);
+  const { focusIndex, cellRefs, onKeyDown, onFocusCell } = useRovingFocus(
+    board.spaces.length,
+    selected,
+  );
 
   return (
     <div className="board-frame relative aspect-square w-full rounded-2xl bg-board p-1">
+      {/* biome-ignore lint/a11y/useSemanticElements: a fieldset would announce the board as a form */}
       <div
+        role="group"
+        aria-label="Board: arrow keys move between spaces, Enter shows details"
+        data-board
+        onKeyDown={onKeyDown}
         className="grid size-full gap-px overflow-hidden rounded-xl bg-line-strong"
         style={{
           gridTemplateColumns: TRACKS.map((t) => `${t}fr`).join(" "),
@@ -140,13 +149,12 @@ export function Board({
               dimmed={highlightOwner !== null && owner?.id !== highlightOwner}
               flash={flashes[index] ?? null}
               occupants={active.filter((p) => p.position === index).map((p) => p.name)}
-              cellRef={
-                selected === index
-                  ? (el) => {
-                      anchorRef.current = el;
-                    }
-                  : undefined
-              }
+              cellRef={(el) => {
+                cellRefs.current[index] = el;
+                if (selected === index) anchorRef.current = el;
+              }}
+              tabIndex={index === focusIndex ? 0 : -1}
+              onFocus={() => onFocusCell(index)}
               onSelect={() => onSelect(index)}
             />
           );
@@ -194,6 +202,8 @@ function SpaceCell({
   flash,
   occupants,
   cellRef,
+  tabIndex,
+  onFocus,
   onSelect,
 }: {
   space: Space;
@@ -206,7 +216,9 @@ function SpaceCell({
   /** Changes whenever the space is newly bought, replaying the purchase flash. */
   flash: number | null;
   occupants: string[];
-  cellRef?: (el: HTMLButtonElement | null) => void;
+  cellRef: (el: HTMLButtonElement | null) => void;
+  tabIndex: number;
+  onFocus: () => void;
   onSelect: () => void;
 }) {
   const { row, col } = cellFor(index);
@@ -235,6 +247,8 @@ function SpaceCell({
     <button
       ref={cellRef}
       type="button"
+      tabIndex={tabIndex}
+      onFocus={onFocus}
       onClick={onSelect}
       aria-pressed={selected}
       aria-haspopup="dialog"
@@ -324,6 +338,46 @@ function SpaceCell({
       )}
     </button>
   );
+}
+
+/**
+ * Makes the board a single Tab stop: arrow keys walk the spaces in board
+ * order, Home and End jump to the first and last space.
+ */
+function useRovingFocus(count: number, selected: number | null) {
+  const [focusIndex, setFocusIndex] = useState(selected ?? 0);
+  const cellRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  // Selecting a space by other means (a click, the property list) moves the Tab stop with it.
+  useEffect(() => {
+    if (selected !== null) setFocusIndex(selected);
+  }, [selected]);
+
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    let next: number;
+    switch (e.key) {
+      case "ArrowRight":
+      case "ArrowDown":
+        next = (focusIndex + 1) % count;
+        break;
+      case "ArrowLeft":
+      case "ArrowUp":
+        next = (focusIndex - 1 + count) % count;
+        break;
+      case "Home":
+        next = 0;
+        break;
+      case "End":
+        next = count - 1;
+        break;
+      default:
+        return;
+    }
+    e.preventDefault();
+    setFocusIndex(next);
+    cellRefs.current[next]?.focus();
+  };
+
+  return { focusIndex, cellRefs, onKeyDown, onFocusCell: setFocusIndex };
 }
 
 /** Marks cells whose owner just changed, so they flash in the new owner's colour. */

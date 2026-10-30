@@ -1,6 +1,6 @@
 import { getBoard, getLegalActions, type PublicGameState } from "@richual/engine";
 import type { LobbySnapshot } from "@richual/protocol";
-import { X } from "lucide-react";
+import { LayoutGrid, List, X } from "lucide-react";
 import { type RefObject, useCallback, useEffect, useRef, useState } from "react";
 import { useNeedsYouAlert, useNotificationPreference } from "../alerts";
 import { type LoggedEvent, useConnection } from "../connection";
@@ -16,6 +16,7 @@ import {
   PopoverAnchor,
   PopoverContent,
   PopoverRoot,
+  Sheet,
   Tabs,
   TabsContent,
   TabsList,
@@ -29,6 +30,7 @@ import { heroLabel } from "./heroLabel";
 import { PlayerAvatar } from "./PlayerAvatar";
 import { PlayerMenu } from "./PlayerMenu";
 import { PropertyDetails } from "./PropertyDetails";
+import { PropertyList } from "./PropertyList";
 import { TradesTab } from "./TradesTab";
 
 const TABS = ["players", "trades", "log", "chat"] as const;
@@ -37,6 +39,8 @@ type Tab = (typeof TABS)[number];
 export function GameView({ lobby, game }: { lobby: LobbySnapshot; game: PublicGameState }) {
   const { playerId, log, historySeq, pendingActionId } = useConnection();
   const [selected, setSelected] = useState<number | null>(null);
+  const [view, setView] = useState<"board" | "list">("board");
+  const [sheetSpace, setSheetSpace] = useState<number | null>(null);
   const [tab, setTab] = useState<Tab>("players");
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [previewOwner, setPreviewOwner] = useState<string | null>(null);
@@ -96,25 +100,73 @@ export function GameView({ lobby, game }: { lobby: LobbySnapshot; game: PublicGa
         }}
       >
         <PopoverAnchor virtualRef={anchor as RefObject<HTMLElement>} />
-        {/* As large as the window allows while staying square and fully visible. */}
-        <div className="mx-auto w-full max-w-[min(100%,calc(100dvh-5.5rem))]">
-          <Board
-            game={game}
-            players={lobby.players}
-            myId={playerId}
-            selected={selected}
-            anchorRef={anchor}
-            onSelect={(space) => setSelected(space === selected ? null : space)}
-            lastCard={lastCard}
-            highlightOwner={previewOwner ?? pinnedOwner}
-          />
+        <div className="flex min-w-0 flex-col gap-2">
+          {/* Phones only: board labels get small, so a readable list is one tap away. */}
+          <div className="flex gap-1 self-center rounded-lg bg-surface-2 p-1 sm:hidden">
+            {(["board", "list"] as const).map((v) => (
+              <Button
+                key={v}
+                variant={view === v ? "outline" : "ghost"}
+                size="sm"
+                aria-pressed={view === v}
+                onClick={() => setView(v)}
+              >
+                {v === "board" ? <LayoutGrid /> : <List />}
+                {v === "board" ? "Board" : "List"}
+              </Button>
+            ))}
+          </div>
+          {/* As large as the window allows while staying square and fully visible. */}
+          <div
+            className={cn(
+              "mx-auto w-full max-w-[min(100%,calc(100dvh-5.5rem))]",
+              view === "list" && "hidden sm:block",
+            )}
+          >
+            <Board
+              game={game}
+              players={lobby.players}
+              myId={playerId}
+              selected={selected}
+              anchorRef={anchor}
+              onSelect={(space) => setSelected(space === selected ? null : space)}
+              lastCard={lastCard}
+              highlightOwner={previewOwner ?? pinnedOwner}
+            />
+          </div>
+          {view === "list" && (
+            <div className="sm:hidden">
+              <PropertyList game={game} players={lobby.players} onSelect={setSheetSpace} />
+            </div>
+          )}
         </div>
         {selected !== null && (
           <PopoverContent side="right" align="center" aria-labelledby="property-heading">
-            <PropertyDetails lobby={lobby} game={game} space={selected} />
+            <PropertyDetails
+              lobby={lobby}
+              game={game}
+              space={selected}
+              onClose={() => setSelected(null)}
+            />
           </PopoverContent>
         )}
       </PopoverRoot>
+      <Sheet
+        open={sheetSpace !== null}
+        onOpenChange={(open) => {
+          if (!open) setSheetSpace(null);
+        }}
+        title="Property details"
+      >
+        {sheetSpace !== null && (
+          <PropertyDetails
+            lobby={lobby}
+            game={game}
+            space={sheetSpace}
+            onClose={() => setSheetSpace(null)}
+          />
+        )}
+      </Sheet>
 
       <aside className="flex min-w-0 flex-col gap-3 lg:sticky lg:top-3 lg:max-h-[calc(100dvh-4.5rem)]">
         <GameToolbar

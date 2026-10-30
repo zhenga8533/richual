@@ -14,7 +14,11 @@ matchmaking queues: games persist across sessions and can be paused, resumed and
 - Classic and Quick modes, optional round or play-time limits scored by net worth
 - Auctions, building, sealing, trading, raising funds and bankruptcy, all enforced by the server
 - Host pause/resume and end-early, optional turn timer with safe auto-play, host handover
-- Reconnect from the same browser at any time; games are kept for 7 days of inactivity
+- Bots to fill seats, or to take over a player who has to leave; rematch in one click
+- Optional Speed Die (on in Quick mode)
+- Reconnect from the same browser at any time, or move your seat to another device with a
+  one-time code or QR; games are kept for 7 days of inactivity
+- Per-client rate limits and a daily cap on new lobbies keep the free tier from being exhausted
 - Chat, turn alerts, and a layout that works on a second monitor or a phone
 
 Player rules: [docs/RULES.md](docs/RULES.md).
@@ -81,13 +85,19 @@ Everything runs within the Cloudflare Workers free plan at friend-group scale. S
 ## Architecture notes
 
 - **The engine is the only rules authority.** `applyAction` is pure and deterministic: the seeded RNG
-  lives in the game state, so any game can be replayed from its action log. The client imports the
-  engine only to show which actions are legal.
+  lives in the game state, so a game replays exactly from its seed and actions. The client imports the
+  engine only to show which actions are legal. Bots (`packages/engine/src/bot.ts`) are a pure
+  function of the same state, so they can only ever play legal moves.
 - **One Durable Object per lobby** serializes every message, validates it with Zod and the engine,
-  and persists the new state, action log and version in one SQLite transaction. Clients send the
+  and persists the new state, recent events and version in one SQLite transaction (two row writes
+  per action, to stay within the free tier). Clients send the
   version they acted on; stale actions are refused with a fresh snapshot, and resent actions are
   acknowledged without being applied twice.
-- **One alarm** drives every deadline: decision timers, the time limit, host handover and idle
-  cleanup.
+- **One alarm** drives every deadline: decision timers, the time limit, host handover, bot moves
+  (one per wake-up, 900 ms apart) and idle cleanup.
+- **A gatekeeper Durable Object** counts requests per hashed client address (raw IPs are never
+  stored) and the global daily lobby cap.
+- **Client errors** are reported to `POST /api/client-errors` and appear in Workers logs, as does a
+  one-line summary of every finished game.
 - **Schemas evolve append-only**: `apps/richual/src/worker/schema.ts` for lobby storage and
   `packages/engine/src/migrations.ts` for saved games.

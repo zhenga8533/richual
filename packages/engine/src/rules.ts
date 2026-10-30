@@ -1,4 +1,10 @@
-import { type BoardDefinition, type ColorGroup, groupIndices, isOwnable } from "./board";
+import {
+  type BoardDefinition,
+  type ColorGroup,
+  groupIndices,
+  indicesOfKind,
+  isOwnable,
+} from "./board";
 import { MAX_OPEN_TRADES } from "./config";
 import type { GameState, PlayerId, PlayerState, TradeBundle } from "./state";
 
@@ -72,6 +78,36 @@ export function ownsGroup(
   group: ColorGroup,
 ): boolean {
   return groupIndices(board, group).every((i) => state.owners[i] === owner);
+}
+
+/**
+ * Rent an owned space charges right now, before card multipliers. Utilities
+ * charge the dice total times `diceTimes`.
+ */
+export function standingRent(
+  state: Pick<GameState, "owners" | "buildings">,
+  board: BoardDefinition,
+  index: number,
+): { souls: number } | { diceTimes: number } | null {
+  const space = board.spaces[index];
+  const owner = state.owners[index];
+  if (!space || !owner) return null;
+  const ownedOfKind = (kind: "zipline" | "utility") =>
+    indicesOfKind(board, kind).filter((i) => state.owners[i] === owner).length;
+  switch (space.kind) {
+    case "property": {
+      const buildings = state.buildings[index] ?? 0;
+      const base = space.rent[buildings] ?? 0;
+      const fullSet = ownsGroup(state, board, owner, space.group);
+      return { souls: buildings === 0 && fullSet ? base * 2 : base };
+    }
+    case "zipline":
+      return { souls: board.ziplineRent[ownedOfKind("zipline") - 1] ?? 0 };
+    case "utility":
+      return { diceTimes: board.utilityMultiplier[ownedOfKind("utility") - 1] ?? 0 };
+    default:
+      return null;
+  }
 }
 
 function groupOf(board: BoardDefinition, space: number): number[] {

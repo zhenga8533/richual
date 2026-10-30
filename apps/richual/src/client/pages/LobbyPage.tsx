@@ -1,10 +1,8 @@
 import type { SessionResponse } from "@richual/protocol";
 import { Check, Link2 } from "lucide-react";
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, lazy, Suspense, useEffect, useRef, useState } from "react";
 import { claimSeat, joinLobby } from "../api";
-import { GameView } from "../components/GameView";
 import { SeatTransfer } from "../components/SeatTransfer";
-import { Setup } from "../components/Setup";
 import { type ConnectionStatus, connect, useConnection } from "../connection";
 import { navigate, seatCodeFromHash } from "../router";
 import { loadName, loadSession, saveName, saveSession } from "../session";
@@ -13,31 +11,33 @@ import { Card } from "../ui/card";
 import { cn } from "../ui/cn";
 import { Input, Label } from "../ui/field";
 
+// The game screens are most of the bundle; the landing page shouldn't wait for them.
+const GameView = lazy(() =>
+  import("../components/GameView").then((m) => ({ default: m.GameView })),
+);
+const Setup = lazy(() => import("../components/Setup").then((m) => ({ default: m.Setup })));
+
 export function LobbyPage({ code }: { code: string }) {
   const [session, setSession] = useState(() => loadSession(code));
   const [seatCode, setSeatCode] = useState(seatCodeFromHash);
   const [claimError, setClaimError] = useState<string | null>(null);
 
+  // A code works once, so it must be claimed once even when effects run twice.
+  const claiming = useRef<string | null>(null);
   useEffect(() => {
-    if (!seatCode) return;
-    // The code is single-use; keep it out of history and bookmarks either way.
+    if (!seatCode || claiming.current === seatCode) return;
+    claiming.current = seatCode;
+    // Keep the code out of history and bookmarks either way.
     history.replaceState(null, "", location.pathname);
-    let cancelled = false;
     claimSeat(code, seatCode)
       .then((claimed) => {
-        if (cancelled) return;
         saveSession(claimed);
         setSession(claimed);
       })
       .catch((err: unknown) => {
-        if (!cancelled) setClaimError(err instanceof Error ? err.message : "Could not move seat");
+        setClaimError(err instanceof Error ? err.message : "Could not move seat");
       })
-      .finally(() => {
-        if (!cancelled) setSeatCode(null);
-      });
-    return () => {
-      cancelled = true;
-    };
+      .finally(() => setSeatCode(null));
   }, [code, seatCode]);
 
   if (seatCode) {
@@ -162,7 +162,11 @@ function Lobby({ session }: { session: SessionResponse }) {
         </p>
       )}
 
-      {lobby && (game ? <GameView lobby={lobby} game={game} /> : <Setup lobby={lobby} />)}
+      {lobby && (
+        <Suspense fallback={<p className="py-16 text-center text-muted">Loading…</p>}>
+          {game ? <GameView lobby={lobby} game={game} /> : <Setup lobby={lobby} />}
+        </Suspense>
+      )}
 
       {status === "closed" && (
         <Button variant="outline" className="self-start" onClick={() => navigate("/")}>

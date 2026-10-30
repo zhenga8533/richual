@@ -16,7 +16,6 @@ import { sendAction, useConnection } from "../connection";
 import { GROUP_COLORS, SOULS, seatColor } from "../theme";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
-import { PopoverClose } from "../ui/radix";
 import { SpaceIcon } from "./SpaceIcon";
 
 const SPACE_NOTES: Record<string, string> = {
@@ -33,10 +32,12 @@ export function PropertyDetails({
   lobby,
   game,
   space: index,
+  onClose,
 }: {
   lobby: LobbySnapshot;
   game: PublicGameState;
   space: number;
+  onClose: () => void;
 }) {
   const { playerId, pendingActionId } = useConnection();
   const board = getBoard(game.config.boardId);
@@ -93,11 +94,15 @@ export function PropertyDetails({
           </h2>
           <p className="text-xs text-muted">{kindLabel}</p>
         </div>
-        <PopoverClose asChild>
-          <Button variant="ghost" size="icon" className="-mt-1 -mr-1 size-8" aria-label="Close">
-            <X />
-          </Button>
-        </PopoverClose>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="-mt-1 -mr-1 size-8"
+          aria-label="Close"
+          onClick={onClose}
+        >
+          <X />
+        </Button>
       </div>
 
       {space.kind === "tax" && (

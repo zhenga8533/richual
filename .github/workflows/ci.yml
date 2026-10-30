@@ -27,7 +27,18 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
-      - run: pnpm --filter richual exec playwright install --with-deps chromium
+      - id: playwright
+        run: echo "version=$(pnpm --filter richual exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+      - id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+      # The browser comes from the cache when the version is unchanged; system libraries never are cached.
+      - if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: pnpm --filter richual exec playwright install --with-deps chromium
+      - if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: pnpm --filter richual exec playwright install-deps chromium
       - run: pnpm e2e
       - uses: actions/upload-artifact@v4
         if: failure()

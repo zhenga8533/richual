@@ -1,11 +1,4 @@
-import {
-  type BoardDefinition,
-  getBoard,
-  groupIndices,
-  indicesOfKind,
-  isOwnable,
-  jailIndex,
-} from "./board";
+import { type BoardDefinition, getBoard, indicesOfKind, isOwnable, jailIndex } from "./board";
 import { DECKS, type DeckId } from "./cards";
 import { MAX_PLAYERS, MIN_PLAYERS, type RuleConfig } from "./config";
 import { checkAction, getLegalActions } from "./legal";
@@ -19,6 +12,7 @@ import {
   mortgageValue,
   nextBuildingLevel,
   sealedTransferFee,
+  standingRent,
   tradeProblem,
   unsealCost,
   WALKER,
@@ -599,39 +593,20 @@ class Game {
   }
 
   private rent(index: number, landing: LandingOptions): number {
-    const space = this.board.spaces[index];
-    const owner = this.state.owners[index];
-    if (!space || !owner) throw new Error(`no rent owed on ${index}`);
-    const ownedOfKind = (kind: "zipline" | "utility") =>
-      indicesOfKind(this.board, kind).filter((i) => this.state.owners[i] === owner).length;
-
-    switch (space.kind) {
-      case "property": {
-        const buildings = this.state.buildings[index] ?? 0;
-        const base = space.rent[buildings] ?? 0;
-        const fullSet = groupIndices(this.board, space.group).every(
-          (i) => this.state.owners[i] === owner,
-        );
-        return buildings === 0 && fullSet ? base * 2 : base;
-      }
-      case "zipline":
-        return (
-          (this.board.ziplineRent[ownedOfKind("zipline") - 1] ?? 0) *
-          (landing.ziplineMultiplier ?? 1)
-        );
-      case "utility": {
-        if (landing.utilityMultiplier !== undefined) {
-          const dice = this.rollDice();
-          this.emit({ type: "rolled", playerId: this.current.id, dice });
-          return (dice[0] + dice[1]) * landing.utilityMultiplier;
-        }
-        const roll = this.state.turn.lastRoll;
-        const total = roll ? roll[0] + roll[1] : 0;
-        return total * (this.board.utilityMultiplier[ownedOfKind("utility") - 1] ?? 0);
-      }
-      default:
-        throw new Error(`space ${index} does not charge rent`);
+    const standing = standingRent(this.state, this.board, index);
+    if (!standing) throw new Error(`no rent owed on ${index}`);
+    if ("souls" in standing) {
+      const zipline = this.board.spaces[index]?.kind === "zipline";
+      return standing.souls * (zipline ? (landing.ziplineMultiplier ?? 1) : 1);
     }
+    if (landing.utilityMultiplier !== undefined) {
+      const dice = this.rollDice();
+      this.emit({ type: "rolled", playerId: this.current.id, dice });
+      return (dice[0] + dice[1]) * landing.utilityMultiplier;
+    }
+    const roll = this.state.turn.lastRoll;
+    const total = roll ? roll[0] + roll[1] : 0;
+    return total * standing.diceTimes;
   }
 
   private requireBuyPhase(): number {

@@ -26,6 +26,11 @@ function isTyping(target: EventTarget | null): boolean {
   return target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
 }
 
+/** The board uses keys to move between spaces, so game shortcuts stay out of its way. */
+function onBoard(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement && target.closest("[data-board]") !== null;
+}
+
 export function useShortcuts({
   game,
   playerId,
@@ -43,7 +48,7 @@ export function useShortcuts({
 }): void {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.ctrlKey || e.metaKey || e.altKey || isTyping(e.target)) return;
+      if (e.ctrlKey || e.metaKey || e.altKey || isTyping(e.target) || onBoard(e.target)) return;
       if (e.key === "?") {
         e.preventDefault();
         onToggleHelp();

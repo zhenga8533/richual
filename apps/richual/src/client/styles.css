@@ -160,6 +160,16 @@
   animation: card-reveal 220ms ease-out;
 }
 
+@keyframes sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+}
+
+.sheet-up {
+  animation: sheet-up 220ms ease-out;
+}
+
 @keyframes dice-roll {
   0% {
     transform: rotate(-8deg) scale(0.9);
