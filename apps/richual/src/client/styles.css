@@ -1,0 +1,108 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Limelight", Georgia, serif;
+  --font-sans: "IBM Plex Sans", system-ui, sans-serif;
+
+  --color-ink: #0f0d0b;
+  --color-smoke: #1b1814;
+  --color-smoke-light: #2a251f;
+  --color-brass: #c9a54a;
+  --color-brass-dim: #8a7234;
+  --color-parchment: #ece2c8;
+  --color-parchment-dim: #b8ad94;
+  --color-amber: #e0a43a;
+  --color-sapphire: #4f7fd1;
+  --color-blood: #e57361;
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply min-h-dvh bg-ink font-sans text-parchment antialiased;
+    background-image: radial-gradient(ellipse at top, #241f18 0%, var(--color-ink) 70%);
+  }
+
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-amber;
+  }
+}
+
+@utility panel {
+  @apply rounded-sm border border-brass-dim/60 bg-smoke/90 shadow-lg shadow-black/40;
+}
+
+@utility btn {
+  @apply inline-flex items-center justify-center gap-2 rounded-sm border px-4 py-2 font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+}
+
+@utility btn-primary {
+  @apply btn border-brass bg-brass text-ink hover:bg-amber;
+}
+
+@utility btn-ghost {
+  @apply btn border-brass-dim text-parchment hover:border-brass hover:bg-smoke-light;
+}
+
+@utility input {
+  @apply w-full rounded-sm border border-brass-dim bg-ink px-3 py-2 text-parchment placeholder:text-parchment-dim/60 focus:border-brass;
+}
+
+/* !important is the point here: reduced motion must win over every component's transitions. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    /* biome-ignore lint/complexity/noImportantStyles: must override all component styles */
+    animation-duration: 0.01ms !important;
+    /* biome-ignore lint/complexity/noImportantStyles: must override all component styles */
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* A double brass rule with stepped deco corners around the board. */
+.deco-frame {
+  background:
+    linear-gradient(var(--color-ink), var(--color-ink)) padding-box,
+    linear-gradient(135deg, var(--color-brass), var(--color-brass-dim) 40%, var(--color-brass))
+    border-box;
+  border: 2px solid transparent;
+  box-shadow:
+    0 0 0 4px var(--color-ink),
+    0 0 0 5px var(--color-brass-dim),
+    0 12px 40px rgb(0 0 0 / 0.6);
+}
+
+@keyframes card-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.card-reveal {
+  animation: card-reveal 220ms ease-out;
+}
+
+@keyframes dice-roll {
+  0% {
+    transform: rotate(-8deg) scale(0.9);
+  }
+  60% {
+    transform: rotate(4deg) scale(1.04);
+  }
+  100% {
+    transform: none;
+  }
+}
+
+.dice-roll {
+  animation: dice-roll 280ms ease-out;
+}
