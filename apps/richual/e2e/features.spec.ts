@@ -47,7 +47,9 @@ test("a bot fills a seat and takes its turns", async ({ browser }) => {
   // Play our own turns with the main action until the bot has had one.
   await expect(async () => {
     if (!(await botRolled.isVisible())) {
-      await host.locator("body").press("Space");
+      // Clicking the Log tab leaves it focused, and Space on a focused button is the button's.
+      await host.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+      await host.keyboard.press("Space");
     }
     await expect(botRolled).toBeVisible({ timeout: 1_500 });
   }).toPass({ timeout: 45_000 });
