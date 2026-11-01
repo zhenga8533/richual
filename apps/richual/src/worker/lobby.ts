@@ -164,6 +164,15 @@ export class LobbyDO extends DurableObject<Env> {
 
   override async fetch(request: Request): Promise<Response> {
     if (!this.lobby()) {
+      // A browser can't read why an upgrade failed and would retry forever, so a client
+      // still holding a session for a closed or expired lobby is told so with a close code.
+      // The socket isn't hibernatable and nothing is stored.
+      if (request.headers.get("Upgrade") === "websocket") {
+        const { 0: client, 1: server } = new WebSocketPair();
+        server.accept();
+        server.close(CloseCode.LobbyClosed, "lobby not found");
+        return new Response(null, { status: 101, webSocket: client });
+      }
       return Response.json({ error: "not_found", message: "Lobby not found" }, { status: 404 });
     }
     if (request.headers.get("Upgrade") !== "websocket") {
@@ -182,6 +191,11 @@ export class LobbyDO extends DurableObject<Env> {
   }
 
   override async webSocketMessage(ws: WebSocket, raw: string | ArrayBuffer): Promise<void> {
+    // A socket opened just before the lobby was deleted can still deliver its hello.
+    if (!this.lobby()) {
+      safeClose(ws, CloseCode.LobbyClosed, "lobby closed");
+      return;
+    }
     if (typeof raw !== "string" || raw.length > MAX_MESSAGE_BYTES) {
       safeClose(ws, 1009, "message too large or not text");
       return;
@@ -267,6 +281,11 @@ export class LobbyDO extends DurableObject<Env> {
         case "createSeatCode":
           await this.createSeatCode(ws, playerId);
           break;
+        case "closeLobby":
+          this.requireHost(playerId);
+          console.log("host closed lobby", this.requireLobby().code);
+          await this.deleteLobby("closed by the host");
+          return;
         case "action":
           this.handleAction(ws, playerId, msg.clientActionId, msg.expectedVersion, msg.action);
           break;
@@ -276,6 +295,26 @@ export class LobbyDO extends DurableObject<Env> {
       send(ws, { type: "error", error: error.code, message: error.message, clientActionId });
     }
     await this.scheduleAlarm();
+  }
+
+  /**
+   * Disconnects everyone, takes down any public listing and wipes all storage,
+   * so the code stops working. Their saved sessions end with LobbyClosed.
+   */
+  private async deleteLobby(reason: string): Promise<void> {
+    const lobby = this.requireLobby();
+    const { code } = lobby;
+    if (parseSettings(lobby.settings_json).visibility === "public") {
+      await this.directory()
+        .remove(code)
+        .catch((error: unknown) => console.error("directory remove failed", code, error));
+    }
+    for (const ws of this.ctx.getWebSockets()) {
+      safeClose(ws, CloseCode.LobbyClosed, reason);
+    }
+    this.listedAs = undefined;
+    await this.ctx.storage.deleteAlarm();
+    await this.ctx.storage.deleteAll();
   }
 
   override async webSocketClose(ws: WebSocket, code: number, reason: string): Promise<void> {
@@ -294,17 +333,7 @@ export class LobbyDO extends DurableObject<Env> {
     const now = Date.now();
     if (now >= lobby.last_active_at + IDLE_TTL_MS) {
       console.log("deleting idle lobby", lobby.code);
-      const { code } = lobby;
-      if (parseSettings(lobby.settings_json).visibility === "public") {
-        await this.directory()
-          .remove(code)
-          .catch((error: unknown) => console.error("directory remove failed", code, error));
-      }
-      for (const ws of this.ctx.getWebSockets()) {
-        safeClose(ws, CloseCode.LobbyClosed, "lobby expired");
-      }
-      await this.ctx.storage.deleteAlarm();
-      await this.ctx.storage.deleteAll();
+      await this.deleteLobby("lobby expired");
       return;
     }
 

@@ -165,3 +165,21 @@ test("the host can add a Hard bot", async ({ browser }) => {
   await host.getByRole("menuitem", { name: /Hard bot/ }).click();
   await expect(host.getByText("Bot · Hard")).toBeVisible();
 });
+
+test("the host can close the lobby for everyone", async ({ browser }) => {
+  const host = await newPlayer(browser);
+  const url = await createLobby(host, "Closer");
+  const guest = await newPlayer(browser);
+  await guest.goto(url);
+  await guest.getByLabel("Your name").fill("Guest");
+  await guest.getByRole("button", { name: "Join" }).click();
+  await expect(host.getByText("Guest")).toBeVisible();
+
+  await host.getByRole("button", { name: "Close lobby" }).click();
+  await host.getByRole("button", { name: "Close for everyone" }).click();
+  await expect(guest.getByText("This lobby has closed.")).toBeVisible();
+  await expect(host.getByText("This lobby has closed.")).toBeVisible();
+
+  await host.goto("/");
+  await expect(host.getByText(url.slice(-6))).toHaveCount(0);
+});

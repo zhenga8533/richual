@@ -27,6 +27,15 @@ describe("HTTP API", () => {
     expect(tables.filter((t) => !String(t.name).startsWith("_cf"))).toEqual([]);
   });
 
+  it("tells a socket to a missing lobby that it closed, without creating storage", async () => {
+    const socket = await openSocket("ZZZZZY");
+    expect((await socket.closed).code).toBe(CloseCode.LobbyClosed);
+    const tables = await runInDurableObject(env.LOBBY.getByName("ZZZZZY"), (_, state) =>
+      state.storage.sql.exec("SELECT name FROM sqlite_master WHERE type = 'table'").toArray(),
+    );
+    expect(tables.filter((t) => !String(t.name).startsWith("_cf"))).toEqual([]);
+  });
+
   it("returns 404 for malformed codes", async () => {
     expect((await post("/api/lobbies/bad!/join", { name: "x" })).status).toBe(404);
   });

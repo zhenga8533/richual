@@ -94,6 +94,14 @@ describe("public lobbies", () => {
     expect(await eventually((codes) => !codes.includes(session.code))).not.toContain(session.code);
   });
 
+  it("takes the listing down when the host closes the lobby", async () => {
+    const { session, socket } = await publicLobby();
+    await eventually((codes) => codes.includes(session.code));
+    socket.send({ type: "closeLobby" });
+    await socket.closed;
+    expect(await listedCodes()).not.toContain(session.code);
+  });
+
   it("hides and prunes listings that went stale", async () => {
     const { session } = await publicLobby();
     await eventually((codes) => codes.includes(session.code));

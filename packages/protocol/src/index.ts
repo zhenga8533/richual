@@ -300,6 +300,8 @@ export const ClientMessage = z.discriminatedUnion("type", [
   z.object({ type: z.literal("setHost"), playerId: z.string().max(64) }),
   z.object({ type: z.literal("rematch") }),
   z.object({ type: z.literal("createSeatCode") }),
+  /** Host only: deletes the lobby and its game for everyone. */
+  z.object({ type: z.literal("closeLobby") }),
   z.object({
     type: z.literal("action"),
     /** Client-generated id; resending the same id never applies the action twice. */

@@ -22,6 +22,7 @@ import { Button } from "../ui/button";
 import { Card } from "../ui/card";
 import { cn } from "../ui/cn";
 import { PopoverContent, PopoverRoot, PopoverTrigger, Switch } from "../ui/radix";
+import { CloseLobbyButton } from "./CloseLobbyButton";
 import { formatDuration, useServerNow } from "./Countdown";
 import { SeatTransfer } from "./SeatTransfer";
 
@@ -172,6 +173,7 @@ export function GameToolbar({ lobby, game, notify, onNotifyChange, onShowShortcu
           )}
         </div>
       )}
+      {isHost && playing && <CloseLobbyButton className="self-start" />}
     </Card>
   );
 }

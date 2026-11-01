@@ -16,6 +16,7 @@ import { Button } from "../ui/button";
 import { Card } from "../ui/card";
 import { cn } from "../ui/cn";
 import { Input } from "../ui/field";
+import { CloseLobbyButton } from "./CloseLobbyButton";
 import { Countdown, useServerNow } from "./Countdown";
 
 type Props = { lobby: LobbySnapshot; game: PublicGameState };
@@ -453,6 +454,7 @@ function GameOver({
           <Button variant="outline" onClick={() => send({ type: "returnToLobby" })}>
             Back to lobby
           </Button>
+          <CloseLobbyButton className="basis-full" />
         </div>
       ) : (
         <p className="text-sm text-muted">The host can start another game.</p>
