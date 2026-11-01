@@ -1,4 +1,5 @@
-import { SessionResponse } from "@richual/protocol";
+import type { SessionResponse } from "@richual/protocol";
+import { isSessionResponse } from "./wire";
 
 const key = (code: string) => `richual:session:${code}`;
 const NAME_KEY = "richual:name";
@@ -9,8 +10,8 @@ export function loadSession(code: string): SessionResponse | null {
   try {
     const raw = localStorage.getItem(key(code));
     if (!raw) return null;
-    const parsed = SessionResponse.safeParse(JSON.parse(raw));
-    return parsed.success ? parsed.data : null;
+    const parsed: unknown = JSON.parse(raw);
+    return isSessionResponse(parsed) ? parsed : null;
   } catch {
     return null;
   }

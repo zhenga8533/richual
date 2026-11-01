@@ -1,20 +1,17 @@
 import type { Action, GameEvent, PublicGameState, RuleConfig } from "@richual/engine";
 import { HERO_IDS, MODES } from "@richual/engine";
 import { z } from "zod";
+import { LOBBY_CODE_PATTERN } from "./constants";
 
-/** Bumped on any breaking change to the wire format; clients on another version must reload. */
-export const PROTOCOL_VERSION = 6;
+export * from "./constants";
 
 export const MAX_MESSAGE_BYTES = 16 * 1024;
 export const MAX_PLAYERS = 6;
 
-/** Crockford base32 without I, L, O, U to avoid confusable characters in invite codes. */
-export const LOBBY_CODE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-export const LOBBY_CODE_LENGTH = 6;
 export const LobbyCode = z
   .string()
   .transform((s) => s.toUpperCase())
-  .pipe(z.string().regex(new RegExp(`^[${LOBBY_CODE_ALPHABET}]{${LOBBY_CODE_LENGTH}}$`)));
+  .pipe(z.string().regex(LOBBY_CODE_PATTERN));
 
 export const PlayerName = z
   .string()

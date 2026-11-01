@@ -1,4 +1,4 @@
-import { LobbyCode, SeatCode } from "@richual/protocol";
+import { normalizeCode } from "@richual/protocol/constants";
 import { type FormEvent, useState } from "react";
 import { createLobby } from "../api";
 import { lobbyPath, navigate, seatHash } from "../router";
@@ -6,7 +6,7 @@ import { loadName, saveName, saveSession } from "../session";
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
 import { Input, Label } from "../ui/field";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/radix";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 
 export function Landing() {
   const [name, setName] = useState(loadName);
@@ -33,17 +33,17 @@ export function Landing() {
 
   const onJoin = (e: FormEvent) => {
     e.preventDefault();
-    const parsed = LobbyCode.safeParse(code.trim());
-    if (!parsed.success) {
+    const lobby = normalizeCode(code);
+    if (!lobby) {
       setError("Invite codes are 6 letters or digits.");
       return;
     }
-    const seat = seatCode.trim().toUpperCase();
-    if (seat && !SeatCode.safeParse(seat).success) {
+    const seat = seatCode.trim() ? normalizeCode(seatCode) : null;
+    if (seatCode.trim() && !seat) {
       setError("Seat codes are 6 letters or digits.");
       return;
     }
-    navigate(`${lobbyPath(parsed.data)}${seat ? seatHash(seat) : ""}`);
+    navigate(`${lobbyPath(lobby)}${seat ? seatHash(seat) : ""}`);
   };
 
   return (

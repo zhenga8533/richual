@@ -1,43 +1,11 @@
-import {
-  Dialog,
-  DropdownMenu,
-  Popover,
-  Switch as SwitchPrimitive,
-  Tabs as TabsPrimitive,
-} from "radix-ui";
+import { Dialog, Popover, Switch as SwitchPrimitive } from "radix-ui";
 import type { ComponentProps, ReactNode } from "react";
 import { cn } from "./cn";
 
-// ---------- Tabs ----------
-
-export const Tabs = TabsPrimitive.Root;
-
-export function TabsList({ className, ...props }: ComponentProps<typeof TabsPrimitive.List>) {
-  return (
-    <TabsPrimitive.List
-      className={cn("flex gap-1 rounded-lg bg-surface-2 p-1", className)}
-      {...props}
-    />
-  );
-}
-
-export function TabsTrigger({ className, ...props }: ComponentProps<typeof TabsPrimitive.Trigger>) {
-  return (
-    <TabsPrimitive.Trigger
-      className={cn(
-        "inline-flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-sm font-medium text-muted transition-colors hover:text-fg data-[state=active]:bg-surface data-[state=active]:text-fg data-[state=active]:shadow-card",
-        className,
-      )}
-      {...props}
-    />
-  );
-}
-
-export function TabsContent({ className, ...props }: ComponentProps<typeof TabsPrimitive.Content>) {
-  return (
-    <TabsPrimitive.Content className={cn("focus-visible:outline-none", className)} {...props} />
-  );
-}
+// Tabs and the menu live in their own modules so the landing page can load them
+// without the dialog and popover code.
+export * from "./menu";
+export * from "./tabs";
 
 // ---------- Popover ----------
 
@@ -71,7 +39,7 @@ export const PopoverClose = Popover.Close;
 
 /**
  * A dialog that slides up from the bottom on phones. Non-modal for the same
- * CSP reason as the menu below, so it draws its own backdrop.
+ * CSP reason as the menu in ./menu, so it draws its own backdrop.
  */
 export function Sheet({
   open,
@@ -120,63 +88,5 @@ export function Switch({ className, ...props }: ComponentProps<typeof SwitchPrim
     >
       <SwitchPrimitive.Thumb className="size-4.5 rounded-full bg-fg shadow transition-transform data-[state=checked]:translate-x-4 data-[state=checked]:bg-accent-fg" />
     </SwitchPrimitive.Root>
-  );
-}
-
-// ---------- Dropdown menu ----------
-
-/**
- * Non-modal: a modal menu locks page scroll by injecting an inline <style> element,
- * which the Content Security Policy (rightly) blocks.
- */
-export function MenuRoot(props: ComponentProps<typeof DropdownMenu.Root>) {
-  return <DropdownMenu.Root modal={false} {...props} />;
-}
-export const MenuTrigger = DropdownMenu.Trigger;
-export const MenuRadioGroup = DropdownMenu.RadioGroup;
-
-export function MenuContent({ className, ...props }: ComponentProps<typeof DropdownMenu.Content>) {
-  return (
-    <DropdownMenu.Portal>
-      <DropdownMenu.Content
-        sideOffset={6}
-        align="end"
-        className={cn(
-          "z-50 min-w-40 rounded-xl border border-line bg-surface p-1 text-fg shadow-pop",
-          className,
-        )}
-        {...props}
-      />
-    </DropdownMenu.Portal>
-  );
-}
-
-export function MenuItem({ className, ...props }: ComponentProps<typeof DropdownMenu.Item>) {
-  return (
-    <DropdownMenu.Item
-      className={cn(
-        "flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none select-none data-[highlighted]:bg-surface-2 [&_svg]:size-4 [&_svg]:text-muted",
-        className,
-      )}
-      {...props}
-    />
-  );
-}
-
-export function MenuRadioItem({
-  className,
-  children,
-  ...props
-}: ComponentProps<typeof DropdownMenu.RadioItem>) {
-  return (
-    <DropdownMenu.RadioItem
-      className={cn(
-        "flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none select-none data-[highlighted]:bg-surface-2 data-[state=checked]:text-accent-text",
-        className,
-      )}
-      {...props}
-    >
-      {children}
-    </DropdownMenu.RadioItem>
   );
 }

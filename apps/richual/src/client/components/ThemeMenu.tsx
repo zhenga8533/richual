@@ -1,7 +1,7 @@
 import { Monitor, Moon, Sun } from "lucide-react";
 import { type ThemePreference, useThemePreference } from "../themePreference";
 import { Button } from "../ui/button";
-import { MenuContent, MenuRadioGroup, MenuRadioItem, MenuRoot, MenuTrigger } from "../ui/radix";
+import { MenuContent, MenuRadioGroup, MenuRadioItem, MenuRoot, MenuTrigger } from "../ui/menu";
 
 const OPTIONS: { value: ThemePreference; label: string; Icon: typeof Sun }[] = [
   { value: "system", label: "System", Icon: Monitor },

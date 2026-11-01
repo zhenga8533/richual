@@ -1,4 +1,5 @@
-import { ErrorResponse, SessionResponse } from "@richual/protocol";
+import type { ErrorResponse, SessionResponse } from "@richual/protocol";
+import { isErrorResponse, isSessionResponse } from "./wire";
 
 export class ApiError extends Error {
   constructor(
@@ -17,11 +18,11 @@ async function post(path: string, body: unknown): Promise<SessionResponse> {
   });
   const json: unknown = await res.json().catch(() => null);
   if (!res.ok) {
-    const err = ErrorResponse.safeParse(json);
-    if (err.success) throw new ApiError(err.data.error, err.data.message);
+    if (isErrorResponse(json)) throw new ApiError(json.error, json.message);
     throw new ApiError("internal", `Request failed (${res.status})`);
   }
-  return SessionResponse.parse(json);
+  if (!isSessionResponse(json)) throw new ApiError("internal", "Unexpected response from server");
+  return json;
 }
 
 export const createLobby = (name: string) => post("/api/lobbies", { name });
