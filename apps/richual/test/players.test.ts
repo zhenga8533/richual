@@ -147,6 +147,33 @@ describe("bots", () => {
 });
 
 describe("host tools", () => {
+  it("lets the host close the lobby for everyone, deleting it", async () => {
+    const hostSession = await createLobby("Host");
+    const guestSession = await joinLobby(hostSession.code, "Guest");
+    const { socket: host } = await connect(hostSession);
+    const { socket: guest } = await connect(guestSession);
+    host.send({ type: "closeLobby" });
+    expect((await host.closed).code).toBe(CloseCode.LobbyClosed);
+    expect((await guest.closed).code).toBe(CloseCode.LobbyClosed);
+
+    const tables = await runInDurableObject(env.LOBBY.getByName(hostSession.code), (_, state) =>
+      state.storage.sql
+        .exec<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table'")
+        .toArray()
+        .filter((t) => !t.name.startsWith("_cf")),
+    );
+    expect(tables).toEqual([]);
+    const rejoin = await post(`/api/lobbies/${hostSession.code}/join`, { name: "Late" });
+    expect(rejoin.status).toBe(404);
+  });
+
+  it("only lets the host close the lobby", async () => {
+    const hostSession = await createLobby("Host");
+    const guest = await connect(await joinLobby(hostSession.code, "Guest"));
+    guest.socket.send({ type: "closeLobby" });
+    expect(await guest.socket.until("error")).toMatchObject({ error: "forbidden" });
+  });
+
   it("removes a player before the game and closes their socket", async () => {
     const hostSession = await createLobby("Host");
     const guestSession = await joinLobby(hostSession.code, "Guest");

@@ -16,6 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Select } from "../ui/field";
 import { MenuContent, MenuItem, MenuRoot, MenuTrigger, Switch } from "../ui/radix";
 import { ChatPanel } from "./ChatPanel";
+import { CloseLobbyButton } from "./CloseLobbyButton";
 import { heroLabel } from "./heroLabel";
 import { PlayerAvatar } from "./PlayerAvatar";
 import { PlayerMenu } from "./PlayerMenu";
@@ -298,6 +299,7 @@ export function Setup({ lobby }: { lobby: LobbySnapshot }) {
                 Waiting for the host to start the game…
               </p>
             )}
+            {isHost && <CloseLobbyButton className="mt-2 w-full" />}
           </div>
         </CardContent>
       </Card>
