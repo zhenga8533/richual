@@ -11,6 +11,7 @@ import {
   WALKER,
 } from "@richual/engine";
 import type { LobbyPlayer } from "@richual/protocol";
+import { Lock } from "lucide-react";
 import { type KeyboardEvent, type RefObject, useEffect, useRef, useState } from "react";
 import { shortName } from "../boardLabels";
 import { GROUP_COLORS, initials, SOULS, seatColor } from "../theme";
@@ -128,7 +129,7 @@ export function Board({
         aria-label="Board: arrow keys move between spaces, Enter shows details"
         data-board
         onKeyDown={onKeyDown}
-        className="grid size-full gap-px overflow-hidden rounded-xl bg-line-strong"
+        className="grid size-full gap-px overflow-hidden rounded-xl bg-line-strong [container-type:size]"
         style={{
           gridTemplateColumns: TRACKS.map((t) => `${t}fr`).join(" "),
           gridTemplateRows: TRACKS.map((t) => `${t}fr`).join(" "),
@@ -253,7 +254,7 @@ function SpaceCell({
       aria-pressed={selected}
       aria-haspopup="dialog"
       className={cn(
-        "@container relative flex min-h-0 min-w-0 overflow-hidden bg-cell text-[clamp(6px,15cqmin,13px)] leading-tight text-fg transition-[background-color,opacity] [container-type:size] hover:bg-cell-hover",
+        "@container/cell relative flex min-h-0 min-w-0 overflow-hidden bg-cell text-[clamp(6px,1.5cqw,13px)] leading-tight text-fg transition-[background-color,opacity] [container-type:size] hover:bg-cell-hover",
         layout,
         selected && "z-10 ring-2 ring-accent ring-inset",
         dimmed && "opacity-30",
@@ -285,7 +286,6 @@ function SpaceCell({
           "flex min-h-0 min-w-0 flex-1 items-center justify-center gap-[7%] p-[6%] text-center",
           horizontal ? "flex-row" : "flex-col",
           side === "left" && "flex-row-reverse",
-          sealed && "opacity-40",
         )}
       >
         {space.kind !== "property" && (
@@ -297,46 +297,77 @@ function SpaceCell({
             )}
           />
         )}
-        <span className="flex min-w-0 flex-col items-center gap-[0.25em]">
-          <span
-            className={cn(
-              "space-name line-clamp-3 font-medium [overflow-wrap:anywhere] [hyphens:auto] @max-[46px]:hidden",
-              side === "corner" && "font-display font-normal text-accent-text",
-            )}
-          >
-            <span className="@max-[88px]:hidden">{space.name}</span>
-            <span className="@min-[88px]:hidden">{shortName(space.name)}</span>
-          </span>
-          {buildings > 0 && (
-            <span className="font-semibold text-accent-text" aria-hidden>
-              {buildings === WALKER ? "◆" : "▲".repeat(buildings)}
-            </span>
+        <span
+          className={cn(
+            "flex flex-col items-center gap-[0.25em]",
+            horizontal ? "min-w-0 flex-1" : "w-full",
           )}
-          {isOwnable(space) && !owner && (
-            <span className="rounded-full bg-surface-2 px-[0.5em] tabular-nums text-muted">
-              {space.price}
-            </span>
-          )}
-          {owner && (
+        >
+          <span className="block w-full [container-type:inline-size] @max-[46px]/cell:hidden">
             <span
-              className="rounded-full px-[0.45em] text-[0.85em] font-bold text-ink"
-              style={{ background: owner.color }}
-              aria-hidden
+              className={cn(
+                "space-name line-clamp-2 font-medium [overflow-wrap:anywhere]",
+                side === "corner" && "font-display font-normal text-accent-text",
+                sealed && "opacity-45",
+              )}
             >
-              {owner.label}
+              <FittedName name={space.name} className="@max-[120px]/cell:hidden" />
+              <FittedName name={shortName(space.name)} className="@min-[120px]/cell:hidden" />
+            </span>
+          </span>
+          {(buildings > 0 || isOwnable(space)) && (
+            <span className="flex items-center gap-[0.3em]" aria-hidden>
+              {buildings > 0 && (
+                <span className="font-semibold whitespace-nowrap text-accent-text">
+                  {buildings === WALKER ? (
+                    "◆"
+                  ) : (
+                    <>
+                      <span className="@max-[46px]/cell:hidden">{"▲".repeat(buildings)}</span>
+                      <span className="@min-[46px]/cell:hidden">{buildings}▲</span>
+                    </>
+                  )}
+                </span>
+              )}
+              {sealed && <Lock className="size-[1.1em] text-danger" strokeWidth={2.5} />}
+              {owner ? (
+                <span
+                  className={cn(
+                    "rounded-full px-[0.45em] text-[0.85em] font-bold text-ink",
+                    sealed && "opacity-45",
+                  )}
+                  style={{ background: owner.color }}
+                >
+                  {owner.label}
+                </span>
+              ) : (
+                isOwnable(space) && (
+                  <span className="rounded-full bg-surface-2 px-[0.5em] tabular-nums text-muted">
+                    {space.price}
+                  </span>
+                )
+              )}
             </span>
           )}
         </span>
       </span>
-      {sealed && (
-        <span
-          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 -rotate-12 rounded-sm border border-danger bg-cell/80 px-[0.3em] text-[0.85em] font-semibold tracking-wider text-danger uppercase"
-          aria-hidden
-        >
-          Sealed
-        </span>
-      )}
     </button>
+  );
+}
+
+/** Rough width of one character in em, for shrinking a name until its longest word fits. */
+const CHAR_EM = 0.6;
+
+/** Shrinks below the cell's font size when the longest word would otherwise be split. */
+function FittedName({ name, className }: { name: string; className: string }) {
+  const longest = Math.max(...name.split(" ").map((word) => word.length));
+  return (
+    <span
+      className={className}
+      style={{ fontSize: `min(1em, calc(100cqw / ${(longest * CHAR_EM).toFixed(2)}))` }}
+    >
+      {name}
+    </span>
   );
 }
 
