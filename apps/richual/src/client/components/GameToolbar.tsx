@@ -99,17 +99,20 @@ export function GameToolbar({ lobby, game, notify, onNotifyChange, onShowShortcu
       </div>
 
       {(lobby.paused || (game.finalRound !== null && playing)) && (
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2 text-xs text-muted">
           {lobby.paused && (
-            <Badge variant="solid" role="status">
-              Paused
-            </Badge>
+            <>
+              <Badge variant="solid" role="status">
+                Paused
+              </Badge>
+              {isHost ? "Turn timers are stopped." : "Waiting for the host to resume."}
+            </>
           )}
           {game.finalRound !== null && playing && <Badge variant="accent">Final round</Badge>}
         </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-1 border-t border-line pt-2">
+      <div className="flex items-center gap-1 border-t border-line pt-2">
         <SoundControl />
         <Button
           variant="ghost"
@@ -131,41 +134,44 @@ export function GameToolbar({ lobby, game, notify, onNotifyChange, onShowShortcu
           <Keyboard />
         </Button>
         {playing && <SeatTransfer code={lobby.code} compact />}
-        {isHost && playing && (
-          <span className="ml-auto flex items-center gap-1">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => send({ type: lobby.paused ? "resume" : "pause" })}
-            >
-              {lobby.paused ? <Play /> : <Pause />}
-              {lobby.paused ? "Resume" : "Pause"}
-            </Button>
-            {confirmEnd ? (
-              <>
-                <Button
-                  variant="danger"
-                  size="sm"
-                  onClick={() => {
-                    send({ type: "endGame" });
-                    setConfirmEnd(false);
-                  }}
-                >
-                  End and score now
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => setConfirmEnd(false)}>
-                  Keep playing
-                </Button>
-              </>
-            ) : (
-              <Button variant="ghost" size="sm" onClick={() => setConfirmEnd(true)}>
+      </div>
+
+      {isHost && playing && (
+        <div className="grid grid-cols-2 gap-2">
+          {confirmEnd ? (
+            <>
+              <Button
+                variant="danger"
+                size="sm"
+                onClick={() => {
+                  send({ type: "endGame" });
+                  setConfirmEnd(false);
+                }}
+              >
+                End and score now
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setConfirmEnd(false)}>
+                Keep playing
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button
+                variant={lobby.paused ? "primary" : "outline"}
+                size="sm"
+                onClick={() => send({ type: lobby.paused ? "resume" : "pause" })}
+              >
+                {lobby.paused ? <Play /> : <Pause />}
+                {lobby.paused ? "Resume" : "Pause"}
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setConfirmEnd(true)}>
                 <Flag />
                 End game
               </Button>
-            )}
-          </span>
-        )}
-      </div>
+            </>
+          )}
+        </div>
+      )}
     </Card>
   );
 }

@@ -14,6 +14,7 @@ import { SOULS } from "../theme";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
+import { cn } from "../ui/cn";
 import { Input } from "../ui/field";
 import { Countdown, useServerNow } from "./Countdown";
 
@@ -413,51 +414,37 @@ function GameOver({
           {END_REASONS[reason]}
         </p>
       </div>
-      <table className="w-full text-sm">
-        <caption className="sr-only">Final standings</caption>
-        <thead className="text-left text-xs text-muted">
-          <tr className="border-b border-line">
-            <th scope="col" className="py-1.5 font-medium">
-              #
-            </th>
-            <th scope="col" className="py-1.5 font-medium">
-              Player
-            </th>
-            <th scope="col" className="py-1.5 text-right font-medium">
-              Souls
-            </th>
-            <th scope="col" className="py-1.5 text-right font-medium">
-              Holdings
-            </th>
-            <th scope="col" className="py-1.5 text-right font-medium">
-              Buildings
-            </th>
-            <th scope="col" className="py-1.5 text-right font-medium">
-              Net worth
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {standings.map((st) => (
-            <tr
-              key={st.playerId}
-              className={`border-b border-line last:border-0 ${st.bankrupt ? "text-muted" : ""}`}
-            >
-              <td className="py-2">{st.rank}</td>
-              <td className={`py-2 ${st.playerId === playerId ? "font-semibold" : ""}`}>
+      <ol aria-label="Final standings" className="flex flex-col text-sm">
+        {standings.map((st) => (
+          <li
+            key={st.playerId}
+            className={cn(
+              "flex items-center gap-3 border-b border-line py-2.5 last:border-0",
+              st.bankrupt && "text-muted",
+            )}
+          >
+            <span className="w-5 shrink-0 text-center font-display text-lg text-muted tabular-nums">
+              {st.rank}
+            </span>
+            <span className="flex min-w-0 flex-1 flex-col">
+              <span className={cn("truncate", st.playerId === playerId && "font-semibold")}>
                 {name(st.playerId)}
-                {st.bankrupt && <span className="text-muted"> (bankrupt)</span>}
-              </td>
-              <td className="py-2 text-right tabular-nums">{st.cash}</td>
-              <td className="py-2 text-right tabular-nums">{st.propertyValue}</td>
-              <td className="py-2 text-right tabular-nums">{st.buildingValue}</td>
-              <td className="py-2 text-right font-semibold tabular-nums text-accent-text">
+              </span>
+              <span className="text-xs text-muted tabular-nums">
+                {st.bankrupt
+                  ? "Bankrupt"
+                  : `${st.cash} souls · ${st.propertyValue} holdings · ${st.buildingValue} buildings`}
+              </span>
+            </span>
+            <span className="shrink-0 text-right whitespace-nowrap">
+              <span className="block font-semibold tabular-nums text-accent-text">
                 {st.netWorth} {SOULS}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+              </span>
+              <span className="block text-xs text-muted">net worth</span>
+            </span>
+          </li>
+        ))}
+      </ol>
       {playerId === lobby.hostId ? (
         <div className="flex flex-wrap gap-2">
           <Button variant="primary" onClick={() => send({ type: "rematch" })}>

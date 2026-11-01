@@ -149,6 +149,6 @@ test("the host can pause, resume and end a game with standings", async ({ browse
   await host.getByRole("button", { name: "End and score now" }).click();
   for (const page of [host, guest]) {
     await expect(page.getByText("Provisional", { exact: true })).toBeVisible();
-    await expect(page.getByRole("table", { name: "Final standings" })).toBeVisible();
+    await expect(page.getByRole("list", { name: "Final standings" })).toBeVisible();
   }
 });
