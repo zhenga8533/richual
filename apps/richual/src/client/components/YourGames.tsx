@@ -10,7 +10,7 @@ import { Card } from "../ui/card";
 
 type Row = { code: string; summary: LobbySummary | null };
 
-function describe(summary: LobbySummary): string {
+function statusText(summary: LobbySummary): string {
   if (summary.status === "open") return "Waiting for players";
   if (summary.status === "finished") return "Finished";
   return `${summary.paused ? "Paused · " : ""}Round ${summary.round ?? 1}`;
@@ -64,7 +64,7 @@ export function YourGames() {
               <span className="flex items-center gap-2">
                 <span className="font-mono text-sm font-semibold tracking-[0.15em]">{code}</span>
                 <span className="truncate text-xs text-muted">
-                  {summary ? describe(summary) : "Status unavailable"}
+                  {summary ? statusText(summary) : "Status unavailable"}
                 </span>
               </span>
               {summary && (

@@ -1,6 +1,7 @@
 import { normalizeCode } from "@richual/protocol/constants";
 import { type FormEvent, useState } from "react";
 import { createLobby } from "../api";
+import { PublicLobbies } from "../components/PublicLobbies";
 import { YourGames } from "../components/YourGames";
 import { lobbyPath, navigate, seatHash } from "../router";
 import { loadName, saveName, saveSession } from "../session";
@@ -63,6 +64,7 @@ export function Landing() {
           <TabsList>
             <TabsTrigger value="create">New game</TabsTrigger>
             <TabsTrigger value="join">Join a game</TabsTrigger>
+            <TabsTrigger value="browse">Browse</TabsTrigger>
           </TabsList>
 
           <TabsContent value="create">
@@ -120,6 +122,10 @@ export function Landing() {
                 Join lobby
               </Button>
             </form>
+          </TabsContent>
+
+          <TabsContent value="browse">
+            <PublicLobbies />
           </TabsContent>
         </Tabs>
       </Card>

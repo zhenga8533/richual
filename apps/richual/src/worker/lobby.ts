@@ -36,6 +36,7 @@ import {
   type SessionResponse,
 } from "@richual/protocol";
 import { generateLobbyCode, generateToken, sha256Hex } from "./crypto";
+import type { Listing } from "./directory";
 import { createSchema, isInitialized, migrate } from "./schema";
 
 /** Lobbies with no activity for this long are deleted. */
@@ -293,6 +294,12 @@ export class LobbyDO extends DurableObject<Env> {
     const now = Date.now();
     if (now >= lobby.last_active_at + IDLE_TTL_MS) {
       console.log("deleting idle lobby", lobby.code);
+      const { code } = lobby;
+      if (parseSettings(lobby.settings_json).visibility === "public") {
+        await this.directory()
+          .remove(code)
+          .catch((error: unknown) => console.error("directory remove failed", code, error));
+      }
       for (const ws of this.ctx.getWebSockets()) {
         safeClose(ws, CloseCode.LobbyClosed, "lobby expired");
       }
@@ -394,7 +401,15 @@ export class LobbyDO extends DurableObject<Env> {
 
   private updateSettings(playerId: string, settings: LobbySettings): void {
     this.requireHost(playerId);
-    this.requireStatus("open");
+    const lobby = this.requireStatus("open");
+    // After a wake-up the lobby doesn't know it was listed; make the next sync remove it.
+    if (
+      settings.visibility === "private" &&
+      parseSettings(lobby.settings_json).visibility === "public" &&
+      this.listedAs === undefined
+    ) {
+      this.listedAs = "unknown";
+    }
     this.sql.exec("UPDATE lobby SET settings_json = ? WHERE id = 1", JSON.stringify(settings));
     this.bumpVersion(Date.now());
     this.broadcast([]);
@@ -1048,6 +1063,54 @@ export class LobbyDO extends DurableObject<Env> {
       if (ws === closing || ws === skip || attachment(ws).playerId === null) continue;
       send(ws, message);
     }
+    this.syncListing(closing);
+  }
+
+  // ---------- Public listing ----------
+
+  private directory() {
+    return this.env.DIRECTORY.getByName("directory");
+  }
+
+  /**
+   * What this lobby last sent the directory: a listing as JSON, null for "not
+   * listed", or undefined when unknown (after a wake-up).
+   */
+  private listedAs: string | null | undefined = undefined;
+
+  /**
+   * Lists the lobby while it is public, waiting, not full and its host is
+   * connected; otherwise takes it down. Only calls the directory on a change.
+   */
+  private syncListing(closing?: WebSocket): void {
+    const lobby = this.lobby();
+    if (!lobby) return;
+    const settings = parseSettings(lobby.settings_json);
+    if (settings.visibility === "private" && !this.listedAs) return;
+    const players = this.players();
+    const host = players.find((p) => p.id === lobby.host_id);
+    const listing: Listing | null =
+      settings.visibility === "public" &&
+      lobby.status === "open" &&
+      players.length < MAX_PLAYERS &&
+      host &&
+      this.connectedIds(closing).has(host.id)
+        ? {
+            code: lobby.code,
+            hostName: host.name,
+            players: players.length,
+            maxPlayers: MAX_PLAYERS,
+            mode: settings.mode,
+            speedDie: settings.speedDie,
+          }
+        : null;
+    const key = listing ? JSON.stringify(listing) : null;
+    if (key === this.listedAs) return;
+    this.listedAs = key;
+    const sync = listing ? this.directory().upsert(listing) : this.directory().remove(lobby.code);
+    this.ctx.waitUntil(
+      sync.catch((error: unknown) => console.error("directory sync failed", lobby.code, error)),
+    );
   }
 }
 

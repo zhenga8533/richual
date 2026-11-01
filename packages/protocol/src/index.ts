@@ -80,6 +80,19 @@ export type SummaryResult = { code: string } & (
 
 export type SummariesResponse = { results: SummaryResult[] };
 
+/** A public lobby waiting for players, as the Browse tab lists it. */
+export type PublicLobby = {
+  code: string;
+  hostName: string;
+  players: number;
+  maxPlayers: number;
+  mode: "classic" | "quick";
+  speedDie: boolean;
+  updatedAt: number;
+};
+
+export type PublicLobbiesResponse = { lobbies: PublicLobby[] };
+
 export const SessionResponse = z.object({
   code: z.string(),
   playerId: z.string(),
@@ -127,6 +140,8 @@ export const LobbySettings = z.object({
   evenBuilding: z.boolean().default(true),
   /** A third die from round 2 on; the Quick preset turns it on. */
   speedDie: z.boolean().default(false),
+  /** Public lobbies are listed for anyone to join while they wait for players. */
+  visibility: z.enum(["private", "public"]).default("private"),
   mode: z.enum(["classic", "quick"]).default("classic"),
   /** When the game is scored if nobody has won outright. */
   limit: z

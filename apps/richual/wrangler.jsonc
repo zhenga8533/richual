@@ -10,12 +10,14 @@
   "durable_objects": {
     "bindings": [
       { "name": "LOBBY", "class_name": "LobbyDO" },
-      { "name": "GATEKEEPER", "class_name": "GatekeeperDO" }
+      { "name": "GATEKEEPER", "class_name": "GatekeeperDO" },
+      { "name": "DIRECTORY", "class_name": "DirectoryDO" }
     ]
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["LobbyDO"] },
-    { "tag": "v2", "new_sqlite_classes": ["GatekeeperDO"] }
+    { "tag": "v2", "new_sqlite_classes": ["GatekeeperDO"] },
+    { "tag": "v3", "new_sqlite_classes": ["DirectoryDO"] }
   ],
   "observability": { "enabled": true }
 }

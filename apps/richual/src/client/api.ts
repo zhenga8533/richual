@@ -1,5 +1,15 @@
-import type { ErrorResponse, SessionResponse, SummariesResponse } from "@richual/protocol";
-import { isErrorResponse, isSessionResponse, isSummariesResponse } from "./wire";
+import type {
+  ErrorResponse,
+  PublicLobbiesResponse,
+  SessionResponse,
+  SummariesResponse,
+} from "@richual/protocol";
+import {
+  isErrorResponse,
+  isPublicLobbiesResponse,
+  isSessionResponse,
+  isSummariesResponse,
+} from "./wire";
 
 export class ApiError extends Error {
   constructor(
@@ -46,5 +56,19 @@ export async function fetchSummaries(sessions: SessionResponse[]): Promise<Summa
     throw new ApiError("internal", `Request failed (${res.status})`);
   }
   if (!isSummariesResponse(json)) throw new ApiError("internal", "Unexpected response from server");
+  return json;
+}
+
+/** Public lobbies waiting for players, newest first. */
+export async function fetchPublicLobbies(): Promise<PublicLobbiesResponse> {
+  const res = await fetch("/api/lobbies/public");
+  const json: unknown = await res.json().catch(() => null);
+  if (!res.ok) {
+    if (isErrorResponse(json)) throw new ApiError(json.error, json.message);
+    throw new ApiError("internal", `Request failed (${res.status})`);
+  }
+  if (!isPublicLobbiesResponse(json)) {
+    throw new ApiError("internal", "Unexpected response from server");
+  }
   return json;
 }

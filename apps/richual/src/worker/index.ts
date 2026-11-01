@@ -7,6 +7,8 @@ import {
   type ErrorResponse,
   JoinLobbyRequest,
   LobbyCode,
+  MAX_PUBLIC_LOBBIES,
+  type PublicLobbiesResponse,
   SummariesRequest,
   type SummariesResponse,
   type SummaryResult,
@@ -16,6 +18,7 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { generateLobbyCode, sha256Hex } from "./crypto";
 import { LIMITS } from "./gatekeeper";
 
+export { DirectoryDO } from "./directory";
 export { GatekeeperDO } from "./gatekeeper";
 export { LobbyDO } from "./lobby";
 
@@ -115,6 +118,13 @@ app.post("/api/lobbies/summaries", async (c) => {
     }),
   );
   return c.json({ results } satisfies SummariesResponse);
+});
+
+app.get("/api/lobbies/public", async (c) => {
+  const limited = await rateLimit(c.env, c.req.raw, ["browse"]);
+  if (limited) return limited;
+  const lobbies = await c.env.DIRECTORY.getByName("directory").list(MAX_PUBLIC_LOBBIES);
+  return c.json({ lobbies } satisfies PublicLobbiesResponse);
 });
 
 app.post("/api/lobbies/:code/join", async (c) => {

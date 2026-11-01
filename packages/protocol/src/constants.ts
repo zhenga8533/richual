@@ -17,3 +17,6 @@ export function normalizeCode(input: string): string | null {
 
 /** Most saved sessions the landing page asks about in one request. */
 export const MAX_SUMMARIES = 20;
+
+/** Most public lobbies the Browse tab shows at once. */
+export const MAX_PUBLIC_LOBBIES = 20;

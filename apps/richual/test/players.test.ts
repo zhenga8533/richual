@@ -8,7 +8,7 @@ import { BASE, connect, createLobby, hello, joinLobby, post, type TestSocket } f
 async function hostWithBot() {
   const hostSession = await createLobby("Host");
   const { socket: host } = await connect(hostSession);
-  host.send({ type: "addBot" });
+  host.send({ type: "addBot", level: "normal" });
   const { lobby } = await host.until("lobby");
   return { hostSession, host, lobby };
 }
@@ -80,7 +80,7 @@ describe("bots", () => {
   it("only lets the host add bots", async () => {
     const hostSession = await createLobby("Host");
     const guest = await connect(await joinLobby(hostSession.code, "Guest"));
-    guest.socket.send({ type: "addBot" });
+    guest.socket.send({ type: "addBot", level: "normal" });
     expect(await guest.socket.until("error")).toMatchObject({ error: "forbidden" });
   });
 
@@ -167,7 +167,7 @@ describe("host tools", () => {
     const { socket: guest } = await connect(guestSession);
     host.send({ type: "startGame" });
     await host.until("lobby");
-    host.send({ type: "replaceWithBot", playerId: guestSession.playerId });
+    host.send({ type: "replaceWithBot", playerId: guestSession.playerId, level: "normal" });
     expect((await guest.closed).code).toBe(CloseCode.Removed);
     let lobby: LobbySnapshot;
     do ({ lobby } = await host.until("lobby"));

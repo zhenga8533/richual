@@ -211,7 +211,9 @@ describe("simulation", () => {
         fc.array(fc.constantFrom(...BOT_LEVELS), { minLength: 6, maxLength: 6 }),
         (seed, n, mixed, rules, levels) => {
           // Every seat gets its own level; in mixed games only the first two seats are bots.
-          const bots = botPolicyFor(Object.fromEntries(IDS.map((id, i) => [id, levels[i] ?? "normal"])));
+          const bots = botPolicyFor(
+            Object.fromEntries(IDS.map((id, i) => [id, levels[i] ?? "normal"])),
+          );
           const policy: Policy = (state, playerId, legal, rng) =>
             !mixed || playerId === "a" || playerId === "b"
               ? bots(state, playerId, legal, rng)

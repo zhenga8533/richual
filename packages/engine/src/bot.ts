@@ -213,8 +213,7 @@ function improve(
       .filter((a): a is Extract<Action, { type: "seal" }> => a.type === "seal")
       .filter((a) => !ownsWholeGroup(state, board, me.id, a.space))
       .sort(
-        (x, y) =>
-          keepScore(state, board, me.id, x.space) - keepScore(state, board, me.id, y.space),
+        (x, y) => keepScore(state, board, me.id, x.space) - keepScore(state, board, me.id, y.space),
       )[0];
     if (stray) return stray;
   }

@@ -186,6 +186,12 @@ export function Setup({ lobby }: { lobby: LobbySnapshot }) {
               <option value="quick">Quick</option>
             </Select>
           </Row>
+          <Toggle
+            label="List publicly: anyone can find and join this lobby while it's waiting for players"
+            checked={settings.visibility === "public"}
+            disabled={!isHost}
+            onChange={(listed) => updateSettings({ visibility: listed ? "public" : "private" })}
+          />
           <Row
             label="Game length"
             hint={

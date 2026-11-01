@@ -1,5 +1,7 @@
 import type {
   ErrorResponse,
+  PublicLobbiesResponse,
+  PublicLobby,
   SessionResponse,
   SummariesResponse,
   SummaryResult,
@@ -33,3 +35,13 @@ const isSummaryResult = (value: unknown): value is SummaryResult =>
 
 export const isSummariesResponse = (value: unknown): value is SummariesResponse =>
   isRecord(value) && Array.isArray(value.results) && value.results.every(isSummaryResult);
+
+const isPublicLobby = (value: unknown): value is PublicLobby =>
+  isRecord(value) &&
+  typeof value.code === "string" &&
+  typeof value.hostName === "string" &&
+  typeof value.players === "number" &&
+  typeof value.maxPlayers === "number";
+
+export const isPublicLobbiesResponse = (value: unknown): value is PublicLobbiesResponse =>
+  isRecord(value) && Array.isArray(value.lobbies) && value.lobbies.every(isPublicLobby);
