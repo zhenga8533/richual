@@ -1,5 +1,5 @@
-import type { ErrorResponse, SessionResponse } from "@richual/protocol";
-import { isErrorResponse, isSessionResponse } from "./wire";
+import type { ErrorResponse, SessionResponse, SummariesResponse } from "@richual/protocol";
+import { isErrorResponse, isSessionResponse, isSummariesResponse } from "./wire";
 
 export class ApiError extends Error {
   constructor(
@@ -32,3 +32,19 @@ export const joinLobby = (code: string, name: string) =>
 
 export const claimSeat = (code: string, seatCode: string) =>
   post(`/api/lobbies/${encodeURIComponent(code)}/claim`, { seatCode });
+
+/** Status of each saved seat, for "Your games". */
+export async function fetchSummaries(sessions: SessionResponse[]): Promise<SummariesResponse> {
+  const res = await fetch("/api/lobbies/summaries", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sessions: sessions.map(({ code, token }) => ({ code, token })) }),
+  });
+  const json: unknown = await res.json().catch(() => null);
+  if (!res.ok) {
+    if (isErrorResponse(json)) throw new ApiError(json.error, json.message);
+    throw new ApiError("internal", `Request failed (${res.status})`);
+  }
+  if (!isSummariesResponse(json)) throw new ApiError("internal", "Unexpected response from server");
+  return json;
+}

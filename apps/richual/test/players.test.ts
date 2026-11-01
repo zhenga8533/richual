@@ -44,6 +44,39 @@ describe("bots", () => {
     expect(bot?.name).toMatch(/^Bot · /);
   });
 
+  it("adds Normal bots unless a level is chosen", async () => {
+    const { host, lobby } = await hostWithBot();
+    expect(botOf(lobby)?.botLevel).toBe("normal");
+    host.send({ type: "addBot", level: "hard" });
+    let next = (await host.until("lobby")).lobby;
+    while (next.players.length < 3) next = (await host.until("lobby")).lobby;
+    expect(next.players.filter((p) => p.bot).map((p) => p.botLevel)).toEqual(["normal", "hard"]);
+  });
+
+  it("lets the host change a bot's level, before and during the game", async () => {
+    const { host, lobby } = await hostWithBot();
+    const botId = botOf(lobby)?.id ?? "";
+    host.send({ type: "setBotLevel", playerId: botId, level: "easy" });
+    let next = (await host.until("lobby")).lobby;
+    while (botOf(next)?.botLevel !== "easy") next = (await host.until("lobby")).lobby;
+
+    host.send({ type: "startGame" });
+    while (next.status !== "playing") next = (await host.until("lobby")).lobby;
+    host.send({ type: "setBotLevel", playerId: botId, level: "hard" });
+    while (botOf(next)?.botLevel !== "hard") next = (await host.until("lobby")).lobby;
+    expect(botOf(next)?.botLevel).toBe("hard");
+  });
+
+  it("only changes the level of bots, and only for the host", async () => {
+    const { hostSession, host, lobby } = await hostWithBot();
+    host.send({ type: "setBotLevel", playerId: hostSession.playerId, level: "hard" });
+    expect(await host.until("error")).toMatchObject({ error: "not_found" });
+
+    const guest = await connect(await joinLobby(hostSession.code, "Guest"));
+    guest.socket.send({ type: "setBotLevel", playerId: botOf(lobby)?.id ?? "", level: "easy" });
+    expect(await guest.socket.until("error")).toMatchObject({ error: "forbidden" });
+  });
+
   it("only lets the host add bots", async () => {
     const hostSession = await createLobby("Host");
     const guest = await connect(await joinLobby(hostSession.code, "Guest"));

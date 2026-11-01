@@ -7,6 +7,9 @@ import {
   type ErrorResponse,
   JoinLobbyRequest,
   LobbyCode,
+  SummariesRequest,
+  type SummariesResponse,
+  type SummaryResult,
 } from "@richual/protocol";
 import { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
@@ -93,6 +96,25 @@ app.post("/api/lobbies", async (c) => {
   }
   console.error("could not allocate a free lobby code");
   return c.json(errorBody("internal", "Could not create a lobby, please retry"), 500);
+});
+
+app.post("/api/lobbies/summaries", async (c) => {
+  const body = SummariesRequest.safeParse(await readJson(c.req.raw));
+  if (!body.success) return c.json(errorBody("bad_request", "Invalid sessions"), 400);
+  const limited = await rateLimit(c.env, c.req.raw, ["summaries"]);
+  if (limited) return limited;
+
+  const results = await Promise.all(
+    body.data.sessions.map(async ({ code, token }): Promise<SummaryResult> => {
+      try {
+        return { code, ...(await c.env.LOBBY.getByName(code).summary(token)) };
+      } catch (error) {
+        console.error("lobby summary failed", code, error);
+        return { code, ok: false, error: "unavailable" };
+      }
+    }),
+  );
+  return c.json({ results } satisfies SummariesResponse);
 });
 
 app.post("/api/lobbies/:code/join", async (c) => {

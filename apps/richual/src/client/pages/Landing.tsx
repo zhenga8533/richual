@@ -1,6 +1,7 @@
 import { normalizeCode } from "@richual/protocol/constants";
 import { type FormEvent, useState } from "react";
 import { createLobby } from "../api";
+import { YourGames } from "../components/YourGames";
 import { lobbyPath, navigate, seatHash } from "../router";
 import { loadName, saveName, saveSession } from "../session";
 import { Button } from "../ui/button";
@@ -54,6 +55,8 @@ export function Landing() {
           Trade souls across the Cursed Apple while the Patrons wait.
         </p>
       </header>
+
+      <YourGames />
 
       <Card className="p-2">
         <Tabs defaultValue="create" onValueChange={() => setError(null)}>

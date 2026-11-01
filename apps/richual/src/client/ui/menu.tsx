@@ -28,6 +28,16 @@ export function MenuContent({ className, ...props }: ComponentProps<typeof Dropd
   );
 }
 
+export function MenuLabel({ className, ...props }: ComponentProps<typeof DropdownMenu.Label>) {
+  return (
+    // biome-ignore lint/a11y/noLabelWithoutControl: a menu group heading, rendered as a div, not a form label
+    <DropdownMenu.Label
+      className={cn("px-2 pt-1.5 pb-1 text-xs font-medium text-muted", className)}
+      {...props}
+    />
+  );
+}
+
 export function MenuItem({ className, ...props }: ComponentProps<typeof DropdownMenu.Item>) {
   return (
     <DropdownMenu.Item

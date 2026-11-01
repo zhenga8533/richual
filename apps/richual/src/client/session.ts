@@ -1,7 +1,8 @@
 import type { SessionResponse } from "@richual/protocol";
 import { isSessionResponse } from "./wire";
 
-const key = (code: string) => `richual:session:${code}`;
+const PREFIX = "richual:session:";
+const key = (code: string) => `${PREFIX}${code}`;
 const NAME_KEY = "richual:name";
 
 // Storage can throw in private windows or with site data blocked; the game must still work.
@@ -22,6 +23,22 @@ export function saveSession(session: SessionResponse): void {
     localStorage.setItem(key(session.code), JSON.stringify(session));
   } catch (error) {
     console.warn("could not persist session; reconnect after reload will not work", error);
+  }
+}
+
+/** Every seat this browser holds, one per lobby. */
+export function listSessions(): SessionResponse[] {
+  try {
+    const sessions: SessionResponse[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const name = localStorage.key(i);
+      if (!name?.startsWith(PREFIX)) continue;
+      const session = loadSession(name.slice(PREFIX.length));
+      if (session) sessions.push(session);
+    }
+    return sessions;
+  } catch {
+    return [];
   }
 }
 

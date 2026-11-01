@@ -1,7 +1,7 @@
 import type { Action, GameEvent, PublicGameState, RuleConfig } from "@richual/engine";
-import { HERO_IDS, MODES } from "@richual/engine";
+import { BOT_LEVELS, HERO_IDS, MODES } from "@richual/engine";
 import { z } from "zod";
-import { LOBBY_CODE_PATTERN } from "./constants";
+import { LOBBY_CODE_PATTERN, MAX_SUMMARIES } from "./constants";
 
 export * from "./constants";
 
@@ -46,6 +46,39 @@ export const ClientErrorReport = z.object({
 });
 export type ClientErrorReport = z.infer<typeof ClientErrorReport>;
 export const SEAT_CODE_TTL_MS = 10 * 60 * 1000;
+
+/** Saved sessions the landing page wants a status for; tokens travel in the body only. */
+export const SummariesRequest = z.object({
+  sessions: z
+    .array(z.object({ code: LobbyCode, token: z.string().min(1).max(128) }))
+    .min(1)
+    .max(MAX_SUMMARIES),
+});
+export type SummariesRequest = z.infer<typeof SummariesRequest>;
+
+/** What "Your games" shows for one saved seat. Plain types: the landing page reads it without Zod. */
+export type LobbySummary = {
+  status: "open" | "playing" | "finished";
+  paused: boolean;
+  /** The round in progress, or null before the game starts. */
+  round: number | null;
+  players: { name: string; bot: boolean }[];
+  /** This seat's name. */
+  you: string;
+  isHost: boolean;
+  lastActiveAt: number;
+};
+
+/**
+ * `not_found`: the lobby expired. `unauthorized`: the seat moved or was removed.
+ * `unavailable`: the lobby couldn't be reached just now; keep the session.
+ */
+export type SummaryResult = { code: string } & (
+  | { ok: true; summary: LobbySummary }
+  | { ok: false; error: "not_found" | "unauthorized" | "unavailable" }
+);
+
+export type SummariesResponse = { results: SummaryResult[] };
 
 export const SessionResponse = z.object({
   code: z.string(),
@@ -128,6 +161,8 @@ export function rulesFromSettings(settings: LobbySettings): RuleConfig {
   };
 }
 
+export const BotLevel = z.enum(BOT_LEVELS);
+
 export const LobbyStatus = z.enum(["open", "playing", "finished"]);
 export type LobbyStatus = z.infer<typeof LobbyStatus>;
 
@@ -139,6 +174,8 @@ export const LobbyPlayer = z.object({
   connected: z.boolean(),
   /** Played by the server; never connects. */
   bot: z.boolean(),
+  /** How well a bot plays; null for people. */
+  botLevel: BotLevel.nullable(),
 });
 export type LobbyPlayer = z.infer<typeof LobbyPlayer>;
 
@@ -237,9 +274,14 @@ export const ClientMessage = z.discriminatedUnion("type", [
   z.object({ type: z.literal("resume") }),
   z.object({ type: z.literal("endGame") }),
   z.object({ type: z.literal("chat"), text: z.string().trim().min(1).max(MAX_CHAT_LENGTH) }),
-  z.object({ type: z.literal("addBot") }),
+  z.object({ type: z.literal("addBot"), level: BotLevel.default("normal") }),
   z.object({ type: z.literal("removePlayer"), playerId: z.string().max(64) }),
-  z.object({ type: z.literal("replaceWithBot"), playerId: z.string().max(64) }),
+  z.object({
+    type: z.literal("replaceWithBot"),
+    playerId: z.string().max(64),
+    level: BotLevel.default("normal"),
+  }),
+  z.object({ type: z.literal("setBotLevel"), playerId: z.string().max(64), level: BotLevel }),
   z.object({ type: z.literal("setHost"), playerId: z.string().max(64) }),
   z.object({ type: z.literal("rematch") }),
   z.object({ type: z.literal("createSeatCode") }),

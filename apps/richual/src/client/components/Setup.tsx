@@ -5,15 +5,16 @@ import {
   MAX_PLAYERS,
   TURN_TIMER_OPTIONS,
 } from "@richual/protocol";
-import { Bot } from "lucide-react";
+import { Bot, ChevronDown } from "lucide-react";
 import type { ReactNode } from "react";
+import { BOT_LEVEL_OPTIONS, botLevelLabel } from "../botLevels";
 import { send, useConnection } from "../connection";
 import { SOULS } from "../theme";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Select } from "../ui/field";
-import { Switch } from "../ui/radix";
+import { MenuContent, MenuItem, MenuRoot, MenuTrigger, Switch } from "../ui/radix";
 import { ChatPanel } from "./ChatPanel";
 import { heroLabel } from "./heroLabel";
 import { PlayerAvatar } from "./PlayerAvatar";
@@ -93,7 +94,7 @@ export function Setup({ lobby }: { lobby: LobbySnapshot }) {
                       {p.name}
                       {p.id === playerId && <Badge>You</Badge>}
                       {p.id === lobby.hostId && <Badge variant="accent">Host</Badge>}
-                      {p.bot && <Badge>Bot</Badge>}
+                      {p.bot && <Badge>Bot · {botLevelLabel(p.botLevel)}</Badge>}
                     </p>
                     <p className="text-xs text-muted">
                       {p.bot ? "Plays automatically" : p.connected ? "Online" : "Offline"}
@@ -126,15 +127,41 @@ export function Setup({ lobby }: { lobby: LobbySnapshot }) {
               ))}
             </ul>
             {isHost && lobby.players.length < MAX_PLAYERS && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="mt-2"
-                onClick={() => send({ type: "addBot" })}
-              >
-                <Bot />
-                Add a bot
-              </Button>
+              <div className="mt-2 flex">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="rounded-r-none"
+                  onClick={() => send({ type: "addBot", level: "normal" })}
+                >
+                  <Bot />
+                  Add a bot
+                </Button>
+                <MenuRoot>
+                  <MenuTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="rounded-l-none border-l-0 px-2"
+                      aria-label="Add a bot at another difficulty"
+                    >
+                      <ChevronDown />
+                    </Button>
+                  </MenuTrigger>
+                  <MenuContent align="start">
+                    {BOT_LEVEL_OPTIONS.map((o) => (
+                      <MenuItem
+                        key={o.level}
+                        onSelect={() => send({ type: "addBot", level: o.level })}
+                        className="flex-col items-start gap-0"
+                      >
+                        <span>{o.label} bot</span>
+                        <span className="text-xs text-muted">{o.hint}</span>
+                      </MenuItem>
+                    ))}
+                  </MenuContent>
+                </MenuRoot>
+              </div>
             )}
           </CardContent>
         </Card>
