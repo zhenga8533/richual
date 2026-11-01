@@ -60,5 +60,7 @@ export const LIMITS = {
   joinLobby: { limit: 20, windowMs: 10 * MINUTE_MS },
   claimSeat: { limit: 10, windowMs: 10 * MINUTE_MS },
   clientError: { limit: 30, windowMs: 10 * MINUTE_MS },
+  summaries: { limit: 30, windowMs: 10 * MINUTE_MS },
+  browse: { limit: 60, windowMs: 10 * MINUTE_MS },
   lobbiesPerDay: { limit: 300, windowMs: DAY_MS },
 } as const;

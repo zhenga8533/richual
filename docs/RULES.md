@@ -101,4 +101,14 @@ a 20-round limit.
   else host. If someone has to leave mid-game, the host can hand their seat to a bot, which keeps
   everything they own and plays on. Bots take a moment between moves so you can follow along, and
   stop when the game is paused.
+- Bots come in three levels, set per bot by the host at any time:
+  - **Easy** keeps plenty in hand, never bids over the printed price and rarely trades.
+  - **Normal** buys sensibly, builds on its sets and offers cash for the last property of a set.
+  - **Hard** sizes its reserve to the worst rent it faces, seals stray properties to build on its
+    sets sooner, won't complete a rival's set cheaply and will trade a spare property for the one
+    it needs.
+- **Your games** on the start page lists every lobby you have a seat in on this device. **Forget**
+  only removes it from the list; you stay in the game.
+- A host can **list a lobby publicly**. It appears on the **Browse** tab while it is waiting for
+  players, has room and the host is online, and disappears once the game starts.
 - After a game, **Rematch** starts a new one with the same players and rules.

@@ -1,4 +1,5 @@
-import { type ClientErrorReport, PROTOCOL_VERSION } from "@richual/protocol";
+import type { ClientErrorReport } from "@richual/protocol";
+import { PROTOCOL_VERSION } from "@richual/protocol/constants";
 
 /** One broken render can throw in a loop; a handful of reports per page load is plenty. */
 const MAX_REPORTS = 5;

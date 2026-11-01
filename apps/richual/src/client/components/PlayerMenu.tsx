@@ -1,8 +1,18 @@
+import type { BotLevel } from "@richual/engine";
 import type { LobbyPlayer, LobbySnapshot } from "@richual/protocol";
 import { Bot, Crown, Ellipsis, UserMinus } from "lucide-react";
+import { BOT_LEVEL_OPTIONS } from "../botLevels";
 import { send, useConnection } from "../connection";
 import { Button } from "../ui/button";
-import { MenuContent, MenuItem, MenuRoot, MenuTrigger } from "../ui/radix";
+import {
+  MenuContent,
+  MenuItem,
+  MenuLabel,
+  MenuRadioGroup,
+  MenuRadioItem,
+  MenuRoot,
+  MenuTrigger,
+} from "../ui/radix";
 
 /** The host's actions for another player's seat; renders nothing for everyone else. */
 export function PlayerMenu({ lobby, player }: { lobby: LobbySnapshot; player: LobbyPlayer }) {
@@ -10,7 +20,7 @@ export function PlayerMenu({ lobby, player }: { lobby: LobbySnapshot; player: Lo
   if (playerId !== lobby.hostId || player.id === playerId) return null;
   const inLobby = lobby.status === "open";
   const inGame = lobby.status === "playing";
-  if (player.bot && !inLobby) return null;
+  if (player.bot && !inLobby && !inGame) return null;
 
   return (
     <MenuRoot>
@@ -20,6 +30,23 @@ export function PlayerMenu({ lobby, player }: { lobby: LobbySnapshot; player: Lo
         </Button>
       </MenuTrigger>
       <MenuContent>
+        {player.bot && (
+          <>
+            <MenuLabel>Difficulty</MenuLabel>
+            <MenuRadioGroup
+              value={player.botLevel ?? "normal"}
+              onValueChange={(level) =>
+                send({ type: "setBotLevel", playerId: player.id, level: level as BotLevel })
+              }
+            >
+              {BOT_LEVEL_OPTIONS.map((o) => (
+                <MenuRadioItem key={o.level} value={o.level}>
+                  {o.label}
+                </MenuRadioItem>
+              ))}
+            </MenuRadioGroup>
+          </>
+        )}
         {!player.bot && (
           <MenuItem onSelect={() => send({ type: "setHost", playerId: player.id })}>
             <Crown />
@@ -33,7 +60,9 @@ export function PlayerMenu({ lobby, player }: { lobby: LobbySnapshot; player: Lo
           </MenuItem>
         )}
         {inGame && !player.bot && (
-          <MenuItem onSelect={() => send({ type: "replaceWithBot", playerId: player.id })}>
+          <MenuItem
+            onSelect={() => send({ type: "replaceWithBot", playerId: player.id, level: "normal" })}
+          >
             <Bot />
             Replace with a bot
           </MenuItem>

@@ -168,3 +168,87 @@ describe("bot trades", () => {
     expect(botAction(s, "a")).not.toMatchObject({ type: "sellBuilding" });
   });
 });
+
+describe("bot levels", () => {
+  it("Easy offers rarely, and less than Normal", () => {
+    const s = newGame(2);
+    own(s, "a", 1);
+    own(s, "b", 3);
+    s.phase = { kind: "awaitingEndTurn" };
+    const offers = [1, 2, 3, 4, 5, 6].map((round) => {
+      s.turn.round = round;
+      return botAction(s, "a", "easy");
+    });
+    const made = offers.filter((o) => o?.type === "proposeTrade");
+    expect(made).toHaveLength(1);
+    expect(made[0]).toMatchObject({ offer: { cash: 75 }, request: { spaces: [3] } });
+  });
+
+  it("Easy keeps a bigger reserve and makes no strategic buys", () => {
+    const s = newGame(2);
+    own(s, "a", 1);
+    player(s, "a").cash = BOT_RESERVE;
+    const landed = roll(s, [1, 2]).state;
+    expect(botAction(landed, "a", "normal")).toEqual({ type: "buy" });
+    expect(botAction(landed, "a", "easy")).toEqual({ type: "decline" });
+  });
+
+  it("Easy never bids above the printed price", () => {
+    let s = newGame(3);
+    own(s, "b", 1);
+    ({ state: s } = roll(s, [1, 2]));
+    ({ state: s } = act(s, "a", "decline"));
+    ({ state: s } = apply(s, "c", { type: "bid", amount: 60 }));
+    expect(botAction(s, "b", "easy")).toEqual({ type: "passAuction" });
+    expect(botAction(s, "b", "normal")).toMatchObject({ type: "bid" });
+  });
+
+  it("Hard seals a stray property to pay for building on a complete set", () => {
+    const s = newGame(2);
+    own(s, "a", 37, 39, 5);
+    player(s, "a").cash = 300;
+    expect(botAction(s, "a", "hard")).toEqual({ type: "seal", space: 5 });
+    expect(botAction(s, "a", "normal")).toEqual({ type: "roll" });
+  });
+
+  it("Hard leaves the seal on until its set is built up", () => {
+    const s = newGame(2);
+    own(s, "a", 37, 39, 5);
+    s.sealed[5] = true;
+    player(s, "a").cash = 5000;
+    expect(botAction(s, "a", "hard")).toMatchObject({ type: "build" });
+  });
+
+  it("Hard won't complete a rival's set for what Normal would accept", () => {
+    const offered = (cash: number) => {
+      const s = newGame(2);
+      own(s, "b", 1);
+      own(s, "a", 3);
+      return apply(s, "b", {
+        type: "proposeTrade",
+        to: "a",
+        offer: bundle({ cash }),
+        request: bundle({ spaces: [3] }),
+      }).state;
+    };
+    expect(botAction(offered(90), "a", "normal")).toEqual({ type: "acceptTrade", tradeId: 1 });
+    expect(botAction(offered(90), "a", "hard")).toEqual({ type: "rejectTrade", tradeId: 1 });
+    expect(botAction(offered(130), "a", "hard")).toEqual({ type: "acceptTrade", tradeId: 1 });
+  });
+
+  it("Hard can offer a spare property towards the last one of a set", () => {
+    const s = newGame(2);
+    own(s, "a", 1, 6);
+    own(s, "b", 3);
+    s.phase = { kind: "awaitingEndTurn" };
+    s.turn.round = 2;
+    const offer = botAction(s, "a", "hard");
+    expect(offer).toMatchObject({
+      type: "proposeTrade",
+      to: "b",
+      offer: { cash: 20, spaces: [6] },
+      request: { spaces: [3] },
+    });
+    expect(checkAction(s, "a", offer as never)).toBeNull();
+  });
+});

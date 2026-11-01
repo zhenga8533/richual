@@ -1,5 +1,5 @@
 import { getBoard, isOwnable } from "./board";
-import { botAction } from "./bot";
+import { type BotLevel, botAction } from "./bot";
 import type { RuleConfig } from "./config";
 import { applyAction, applyTimeout, createGame, type NewPlayer } from "./game";
 import { checkAction, getLegalActions } from "./legal";
@@ -100,12 +100,16 @@ export const randomPolicy: Policy = (state, playerId, legal, rng) => {
   return pick(legal, rng);
 };
 
-/** Plays exactly as a Richual bot would. */
-export const botPolicy: Policy = (state, playerId, legal, rng) => {
-  const action = botAction(state, playerId) ?? legal[0];
-  if (!action) throw new Error("bot policy called with no legal actions");
-  return [action, rng];
-};
+/** Plays exactly as a Richual bot would; seats missing from `levels` play at Normal. */
+export const botPolicyFor =
+  (levels: Readonly<Record<PlayerId, BotLevel>> = {}): Policy =>
+  (state, playerId, legal, rng) => {
+    const action = botAction(state, playerId, levels[playerId]) ?? legal[0];
+    if (!action) throw new Error("bot policy called with no legal actions");
+    return [action, rng];
+  };
+
+export const botPolicy: Policy = botPolicyFor();
 
 /** Players who have something to decide, ignoring offers they could merely withdraw. */
 function actors(state: GameState): PlayerId[] {

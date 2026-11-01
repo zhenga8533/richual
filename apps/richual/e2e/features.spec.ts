@@ -32,7 +32,7 @@ async function createLobby(page: Page, name = "Host"): Promise<string> {
 async function startBotGame(browser: Browser, options = {}): Promise<Page> {
   const host = await newPlayer(browser, options);
   await createLobby(host);
-  await host.getByRole("button", { name: "Add a bot" }).click();
+  await host.getByRole("button", { name: "Add a bot", exact: true }).click();
   await expect(host.getByRole("heading", { name: "Players (2/6)" })).toBeVisible();
   await host.getByRole("button", { name: "Begin the ritual" }).click();
   await expect(host.getByRole("tablist", { name: "Game details" })).toBeVisible();
@@ -110,4 +110,58 @@ test("uncaught errors are reported to the server", async ({ browser }) => {
     });
   });
   expect((await reported).status()).toBe(204);
+});
+
+test("Your games lists every lobby this browser is in, and Rejoin opens it", async ({
+  browser,
+}) => {
+  const page = await newPlayer(browser);
+  const first = await createLobby(page, "Juggler");
+  const second = await createLobby(page, "Juggler");
+  await page.goto("/");
+  const games = page.getByRole("list", { name: "Your games" });
+  const code = (url: string) => url.slice(-6);
+  await expect(games.getByText(code(first))).toBeVisible();
+  await expect(games.getByText(code(second))).toBeVisible();
+  await games
+    .getByRole("listitem")
+    .filter({ hasText: code(first) })
+    .getByRole("button", { name: "Rejoin" })
+    .click();
+  await expect(page).toHaveURL(first);
+  await expect(page.getByRole("heading", { name: /^Players \(/ })).toBeVisible();
+});
+
+test("a public lobby shows up in Browse for another player, who can join it", async ({
+  browser,
+}) => {
+  const host = await newPlayer(browser);
+  const url = await createLobby(host, "Opener");
+  await host.getByRole("switch", { name: /List publicly/ }).click();
+  await expect(host.getByRole("switch", { name: /List publicly/ })).toBeChecked();
+
+  const stranger = await newPlayer(browser);
+  await stranger.goto("/");
+  await stranger.getByRole("tab", { name: "Browse" }).click();
+  const listing = stranger
+    .getByRole("list", { name: "Public lobbies" })
+    .getByRole("listitem")
+    .filter({ hasText: "Opener's lobby" });
+  await expect(async () => {
+    await stranger.getByRole("button", { name: "Refresh public lobbies" }).click();
+    await expect(listing).toBeVisible({ timeout: 1_000 });
+  }).toPass({ timeout: 15_000 });
+  await listing.getByRole("button", { name: "Join" }).click();
+  await expect(stranger).toHaveURL(url);
+  await stranger.getByLabel("Your name").fill("Stranger");
+  await stranger.getByRole("button", { name: "Join" }).click();
+  await expect(host.getByText("Stranger")).toBeVisible();
+});
+
+test("the host can add a Hard bot", async ({ browser }) => {
+  const host = await newPlayer(browser);
+  await createLobby(host);
+  await host.getByRole("button", { name: "Add a bot at another difficulty" }).click();
+  await host.getByRole("menuitem", { name: /Hard bot/ }).click();
+  await expect(host.getByText("Bot · Hard")).toBeVisible();
 });

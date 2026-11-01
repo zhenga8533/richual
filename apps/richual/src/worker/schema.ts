@@ -58,6 +58,7 @@ const MIGRATIONS: readonly string[] = [
    ALTER TABLE players ADD COLUMN seat_code_hash TEXT;
    ALTER TABLE players ADD COLUMN seat_code_expires_at INTEGER;
    ALTER TABLE lobby ADD COLUMN bot_due_at INTEGER;`,
+  `ALTER TABLE players ADD COLUMN bot_level TEXT;`,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;
@@ -93,7 +94,8 @@ const CURRENT_SCHEMA = `
     hero TEXT,
     kind TEXT NOT NULL DEFAULT 'human',
     seat_code_hash TEXT,
-    seat_code_expires_at INTEGER
+    seat_code_expires_at INTEGER,
+    bot_level TEXT
   );
   CREATE TABLE game (
     id INTEGER PRIMARY KEY CHECK (id = 1),

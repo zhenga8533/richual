@@ -4,6 +4,7 @@ import {
   type ApplyResult,
   applyAction,
   applyTimeout,
+  type BotLevel,
   botAction,
   createGame,
   endEarly,
@@ -23,6 +24,7 @@ import {
   LobbySettings,
   type LobbySnapshot,
   type LobbyStatus,
+  type LobbySummary,
   MAX_MESSAGE_BYTES,
   MAX_PLAYERS,
   PING,
@@ -34,6 +36,7 @@ import {
   type SessionResponse,
 } from "@richual/protocol";
 import { generateLobbyCode, generateToken, sha256Hex } from "./crypto";
+import type { Listing } from "./directory";
 import { createSchema, isInitialized, migrate } from "./schema";
 
 /** Lobbies with no activity for this long are deleted. */
@@ -80,6 +83,7 @@ type PlayerRow = {
   seat: number;
   hero: string | null;
   kind: "human" | "bot";
+  bot_level: BotLevel | null;
 };
 
 export type JoinResult =
@@ -242,13 +246,16 @@ export class LobbyDO extends DurableObject<Env> {
           this.chat(playerId, msg.text);
           break;
         case "addBot":
-          this.addBot(playerId);
+          this.addBot(playerId, msg.level);
+          break;
+        case "setBotLevel":
+          this.setBotLevel(playerId, msg.playerId, msg.level);
           break;
         case "removePlayer":
           this.removePlayer(playerId, msg.playerId);
           break;
         case "replaceWithBot":
-          this.replaceWithBot(playerId, msg.playerId);
+          this.replaceWithBot(playerId, msg.playerId, msg.level);
           break;
         case "setHost":
           this.setHost(playerId, msg.playerId);
@@ -287,6 +294,12 @@ export class LobbyDO extends DurableObject<Env> {
     const now = Date.now();
     if (now >= lobby.last_active_at + IDLE_TTL_MS) {
       console.log("deleting idle lobby", lobby.code);
+      const { code } = lobby;
+      if (parseSettings(lobby.settings_json).visibility === "public") {
+        await this.directory()
+          .remove(code)
+          .catch((error: unknown) => console.error("directory remove failed", code, error));
+      }
       for (const ws of this.ctx.getWebSockets()) {
         safeClose(ws, CloseCode.LobbyClosed, "lobby expired");
       }
@@ -388,7 +401,15 @@ export class LobbyDO extends DurableObject<Env> {
 
   private updateSettings(playerId: string, settings: LobbySettings): void {
     this.requireHost(playerId);
-    this.requireStatus("open");
+    const lobby = this.requireStatus("open");
+    // After a wake-up the lobby doesn't know it was listed; make the next sync remove it.
+    if (
+      settings.visibility === "private" &&
+      parseSettings(lobby.settings_json).visibility === "public" &&
+      this.listedAs === undefined
+    ) {
+      this.listedAs = "unknown";
+    }
     this.sql.exec("UPDATE lobby SET settings_json = ? WHERE id = 1", JSON.stringify(settings));
     this.bumpVersion(Date.now());
     this.broadcast([]);
@@ -588,7 +609,7 @@ export class LobbyDO extends DurableObject<Env> {
         limit: settings.limit,
         speedDie: settings.speedDie,
         players: state.players.length,
-        bots: this.botIds().length,
+        bots: this.bots().map((b) => b.level),
         rounds: state.turn.round,
         turns: state.turn.number,
         playMinutes: Math.round(
@@ -601,26 +622,35 @@ export class LobbyDO extends DurableObject<Env> {
 
   // ---------- Bots ----------
 
-  private botIds(): string[] {
+  private bots(): { id: string; level: BotLevel }[] {
     return this.players()
       .filter((p) => p.kind === "bot")
-      .map((p) => p.id);
+      .map((p) => ({ id: p.id, level: p.bot_level ?? "normal" }));
+  }
+
+  private botIds(): string[] {
+    return this.bots().map((b) => b.id);
   }
 
   /** When the next bot move is due, or null if no bot has anything to do. */
   private nextBotDue(state: GameState, now: number): number | null {
     if (state.phase.kind === "gameOver") return null;
-    return this.botIds().some((id) => botAction(state, id) !== null) ? now + BOT_DELAY_MS : null;
+    return this.bots().some((b) => botAction(state, b.id, b.level) !== null)
+      ? now + BOT_DELAY_MS
+      : null;
   }
 
   /** Plays one bot move, the current player's first so turns flow in order. */
   private playBotMove(now: number): void {
     const state = this.game();
-    const bots = this.botIds();
+    const bots = this.bots();
     const current = state.players[state.turn.playerIndex]?.id;
-    const order = [...(current && bots.includes(current) ? [current] : []), ...bots];
-    for (const id of order) {
-      const action = botAction(state, id);
+    const order = [
+      ...bots.filter((b) => b.id === current),
+      ...bots.filter((b) => b.id !== current),
+    ];
+    for (const { id, level } of order) {
+      const action = botAction(state, id, level);
       if (action) {
         this.commitGame(applyAction(state, id, action), now);
         return;
@@ -629,7 +659,7 @@ export class LobbyDO extends DurableObject<Env> {
     this.sql.exec("UPDATE lobby SET bot_due_at = NULL WHERE id = 1");
   }
 
-  private addBot(playerId: string): void {
+  private addBot(playerId: string, level: BotLevel): void {
     this.requireHost(playerId);
     this.requireStatus("open");
     const taken = new Set(this.players().map((p) => p.seat));
@@ -641,8 +671,9 @@ export class LobbyDO extends DurableObject<Env> {
     this.insertPlayer(id, "Bot", seat, generateToken(), now, "bot");
     const hero = this.players().find((p) => p.id === id)?.hero;
     this.sql.exec(
-      "UPDATE players SET name = ? WHERE id = ?",
+      "UPDATE players SET name = ?, bot_level = ? WHERE id = ?",
       `Bot · ${hero ? heroName(hero) : seat + 1}`,
+      level,
       id,
     );
     this.bumpVersion(now);
@@ -660,8 +691,21 @@ export class LobbyDO extends DurableObject<Env> {
     this.broadcast([]);
   }
 
+  /** Changes how well a bot plays, before or during a game. */
+  private setBotLevel(hostId: string, playerId: string, level: BotLevel): void {
+    this.requireHost(hostId);
+    const updated = this.sql.exec(
+      "UPDATE players SET bot_level = ? WHERE id = ? AND kind = 'bot'",
+      level,
+      playerId,
+    );
+    if (updated.rowsWritten === 0) throw new RequestError("not_found", "No such bot");
+    this.bumpVersion(Date.now());
+    this.broadcast([]);
+  }
+
   /** Hands a player's seat to a bot mid-game, keeping everything they own in play. */
-  private replaceWithBot(hostId: string, playerId: string): void {
+  private replaceWithBot(hostId: string, playerId: string, level: BotLevel): void {
     this.requireHost(hostId);
     this.requireStatus("playing");
     const target = this.players().find((p) => p.id === playerId);
@@ -671,7 +715,8 @@ export class LobbyDO extends DurableObject<Env> {
 
     const now = Date.now();
     this.sql.exec(
-      "UPDATE players SET kind = 'bot', name = ?, token_hash = ?, seat_code_hash = NULL, seat_code_expires_at = NULL WHERE id = ?",
+      "UPDATE players SET kind = 'bot', bot_level = ?, name = ?, token_hash = ?, seat_code_hash = NULL, seat_code_expires_at = NULL WHERE id = ?",
+      level,
       `${target.name} (bot)`,
       generateToken(),
       playerId,
@@ -689,6 +734,39 @@ export class LobbyDO extends DurableObject<Env> {
       }
     }
     this.commitGame({ ok: true, state, events }, now);
+  }
+
+  /**
+   * What the landing page's "Your games" shows for the seat holding `token`.
+   * Read-only: a lobby that doesn't exist answers not_found without creating storage.
+   */
+  async summary(
+    token: string,
+  ): Promise<
+    { ok: true; summary: LobbySummary } | { ok: false; error: "not_found" | "unauthorized" }
+  > {
+    const lobby = this.lobby();
+    if (!lobby) return { ok: false, error: "not_found" };
+    const tokenHash = await sha256Hex(token);
+    const me = this.sql
+      .exec<{ id: string; name: string }>(
+        "SELECT id, name FROM players WHERE token_hash = ? AND kind = 'human'",
+        tokenHash,
+      )
+      .toArray()[0];
+    if (!me) return { ok: false, error: "unauthorized" };
+    return {
+      ok: true,
+      summary: {
+        status: lobby.status,
+        paused: lobby.paused === 1,
+        round: lobby.status === "open" ? null : this.game().turn.round,
+        players: this.players().map((p) => ({ name: p.name, bot: p.kind === "bot" })),
+        you: me.name,
+        isHost: lobby.host_id === me.id,
+        lastActiveAt: lobby.last_active_at,
+      },
+    };
   }
 
   private setHost(hostId: string, playerId: string): void {
@@ -863,7 +941,7 @@ export class LobbyDO extends DurableObject<Env> {
 
   private players(): PlayerRow[] {
     return this.sql
-      .exec<PlayerRow>("SELECT id, name, seat, hero, kind FROM players ORDER BY seat")
+      .exec<PlayerRow>("SELECT id, name, seat, hero, kind, bot_level FROM players ORDER BY seat")
       .toArray();
   }
 
@@ -943,13 +1021,14 @@ export class LobbyDO extends DurableObject<Env> {
     const lobby = this.requireLobby();
     const settings = parseSettings(lobby.settings_json);
     const connected = this.connectedIds(closing);
-    const players = this.players().map(({ kind, ...p }) => ({
+    const players = this.players().map(({ kind, bot_level, ...p }) => ({
       ...p,
       hero: (HERO_IDS as readonly string[]).includes(p.hero ?? "")
         ? (p.hero as LobbySnapshot["players"][number]["hero"])
         : null,
       connected: connected.has(p.id),
       bot: kind === "bot",
+      botLevel: kind === "bot" ? (bot_level ?? "normal") : null,
     }));
     const chat = this.sql
       .exec<{ seq: number; player_id: string; text: string; at: number }>(
@@ -984,6 +1063,54 @@ export class LobbyDO extends DurableObject<Env> {
       if (ws === closing || ws === skip || attachment(ws).playerId === null) continue;
       send(ws, message);
     }
+    this.syncListing(closing);
+  }
+
+  // ---------- Public listing ----------
+
+  private directory() {
+    return this.env.DIRECTORY.getByName("directory");
+  }
+
+  /**
+   * What this lobby last sent the directory: a listing as JSON, null for "not
+   * listed", or undefined when unknown (after a wake-up).
+   */
+  private listedAs: string | null | undefined = undefined;
+
+  /**
+   * Lists the lobby while it is public, waiting, not full and its host is
+   * connected; otherwise takes it down. Only calls the directory on a change.
+   */
+  private syncListing(closing?: WebSocket): void {
+    const lobby = this.lobby();
+    if (!lobby) return;
+    const settings = parseSettings(lobby.settings_json);
+    if (settings.visibility === "private" && !this.listedAs) return;
+    const players = this.players();
+    const host = players.find((p) => p.id === lobby.host_id);
+    const listing: Listing | null =
+      settings.visibility === "public" &&
+      lobby.status === "open" &&
+      players.length < MAX_PLAYERS &&
+      host &&
+      this.connectedIds(closing).has(host.id)
+        ? {
+            code: lobby.code,
+            hostName: host.name,
+            players: players.length,
+            maxPlayers: MAX_PLAYERS,
+            mode: settings.mode,
+            speedDie: settings.speedDie,
+          }
+        : null;
+    const key = listing ? JSON.stringify(listing) : null;
+    if (key === this.listedAs) return;
+    this.listedAs = key;
+    const sync = listing ? this.directory().upsert(listing) : this.directory().remove(lobby.code);
+    this.ctx.waitUntil(
+      sync.catch((error: unknown) => console.error("directory sync failed", lobby.code, error)),
+    );
   }
 }
 

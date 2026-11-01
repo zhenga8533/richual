@@ -1,12 +1,13 @@
 import fc from "fast-check";
 import { afterAll, describe, expect, it } from "vitest";
 import { getBoard, groupIndices, isOwnable } from "../src/board";
+import { BOT_LEVELS, type BotLevel } from "../src/bot";
 import { DECKS, type DeckId } from "../src/cards";
 import { CLASSIC_RULES, QUICK_RULES, type RuleConfig } from "../src/config";
 import { getLegalActions } from "../src/legal";
 import { activePlayers, buildingsInUse, currentPlayer, tradeProblem } from "../src/rules";
 import {
-  botPolicy,
+  botPolicyFor,
   type Policy,
   randomPolicy,
   replay,
@@ -207,11 +208,15 @@ describe("simulation", () => {
         fc.integer({ min: 2, max: 6 }),
         fc.boolean(),
         fc.constantFrom(CLASSIC_RULES, QUICK_RULES),
-        (seed, n, mixed, rules) => {
-          // In mixed games only the first two seats are bots.
+        fc.array(fc.constantFrom(...BOT_LEVELS), { minLength: 6, maxLength: 6 }),
+        (seed, n, mixed, rules, levels) => {
+          // Every seat gets its own level; in mixed games only the first two seats are bots.
+          const bots = botPolicyFor(
+            Object.fromEntries(IDS.map((id, i) => [id, levels[i] ?? "normal"])),
+          );
           const policy: Policy = (state, playerId, legal, rng) =>
             !mixed || playerId === "a" || playerId === "b"
-              ? botPolicy(state, playerId, legal, rng)
+              ? bots(state, playerId, legal, rng)
               : randomPolicy(state, playerId, legal, rng);
           simulateGame({
             players: players(n),
@@ -228,20 +233,40 @@ describe("simulation", () => {
     );
   }, 120_000);
 
-  it("always finishes all-bot games", () => {
-    for (let seed = 0; seed < 12; seed++) {
-      for (const rules of [CLASSIC_RULES, QUICK_RULES]) {
-        const result = simulateGame({
-          players: players(4),
-          rules,
-          seed,
-          maxTurns: 2000,
-          policy: botPolicy,
-        });
-        expect(result.finished, `seed ${seed}`).toBe(true);
+  it("always finishes all-bot games at every level", () => {
+    for (const level of BOT_LEVELS) {
+      const policy = botPolicyFor(Object.fromEntries(IDS.map((id) => [id, level])));
+      for (let seed = 0; seed < 8; seed++) {
+        for (const rules of [CLASSIC_RULES, QUICK_RULES]) {
+          const result = simulateGame({ players: players(4), rules, seed, maxTurns: 2000, policy });
+          expect(result.finished, `${level} seed ${seed}`).toBe(true);
+        }
       }
     }
-  }, 120_000);
+  }, 240_000);
+
+  it("ranks the levels: Hard beats Normal, and Normal beats Easy, in most heads-up games", () => {
+    const winRate = (x: BotLevel, y: BotLevel) => {
+      let wins = 0;
+      const games = 60;
+      for (let seed = 0; seed < games; seed++) {
+        // Alternate who moves first.
+        const [first, second] = seed % 2 === 0 ? [x, y] : [y, x];
+        const { final } = simulateGame({
+          players: players(2),
+          rules: CLASSIC_RULES,
+          seed,
+          maxTurns: 1500,
+          policy: botPolicyFor({ a: first, b: second }),
+        });
+        const winner = final.phase.kind === "gameOver" ? final.phase.winnerId : null;
+        if ((winner === "a" ? first : second) === x && winner !== null) wins++;
+      }
+      return wins / games;
+    };
+    expect(winRate("hard", "normal")).toBeGreaterThan(0.55);
+    expect(winRate("normal", "easy")).toBeGreaterThan(0.55);
+  }, 240_000);
 
   describe("length report", () => {
     const rows: Record<string, string | number>[] = [];

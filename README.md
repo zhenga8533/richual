@@ -16,10 +16,13 @@ matchmaking queues: games persist across sessions and can be paused, resumed and
 - Classic and Quick modes, optional round or play-time limits scored by net worth
 - Auctions, building, sealing, trading, raising funds and bankruptcy, all enforced by the server
 - Host pause/resume and end-early, optional turn timer with safe auto-play, host handover
-- Bots to fill seats, or to take over a player who has to leave; rematch in one click
+- Easy, Normal and Hard bots to fill seats, or to take over a player who has to leave; rematch in
+  one click
 - Optional Speed Die (on in Quick mode)
 - Reconnect from the same browser at any time, or move your seat to another device with a
   one-time code or QR; games are kept for 7 days of inactivity
+- **Your games** on the landing page lists every lobby this browser has a seat in
+- Optional public lobbies, listed on the Browse tab while they wait for players
 - Per-client rate limits and a daily cap on new lobbies keep the free tier from being exhausted
 - Chat, turn alerts, and a layout that works on a second monitor or a phone
 
@@ -99,6 +102,11 @@ Everything runs within the Cloudflare Workers free plan at friend-group scale. S
   (one per wake-up, 900 ms apart) and idle cleanup.
 - **A gatekeeper Durable Object** counts requests per hashed client address (raw IPs are never
   stored) and the global daily lobby cap.
+- **A directory Durable Object** holds the public lobbies. A lobby lists itself while it is
+  public, waiting, not full and its host is connected, and takes itself down otherwise; listings
+  older than two hours are pruned in case a lobby vanished without saying so.
+- **The landing page stays small** (about 90 KB gzip): it never loads Zod or the engine, and
+  `pnpm build` fails if its scripts pass 100 KB.
 - **Client errors** are reported to `POST /api/client-errors` and appear in Workers logs, as does a
   one-line summary of every finished game.
 - **Schemas evolve append-only**: `apps/richual/src/worker/schema.ts` for lobby storage and

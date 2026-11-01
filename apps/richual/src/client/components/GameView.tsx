@@ -3,6 +3,7 @@ import type { LobbySnapshot } from "@richual/protocol";
 import { LayoutGrid, List, X } from "lucide-react";
 import { type RefObject, useCallback, useEffect, useRef, useState } from "react";
 import { useNeedsYouAlert, useNotificationPreference } from "../alerts";
+import { botLevelLabel } from "../botLevels";
 import { type LoggedEvent, useConnection } from "../connection";
 import { describeEvent } from "../describe";
 import { useGameFeedback } from "../gameFeedback";
@@ -308,7 +309,7 @@ function Players({
                   <span className="flex items-center gap-1.5 truncate font-medium">
                     {p.name}
                     {p.id === playerId && <Badge>You</Badge>}
-                    {info?.bot && <Badge>Bot</Badge>}
+                    {info?.bot && <Badge>Bot · {botLevelLabel(info.botLevel)}</Badge>}
                     {isCurrent && <Badge variant="accent">Turn</Badge>}
                   </span>
                   <span className="block truncate text-xs text-muted">
