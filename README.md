@@ -4,6 +4,8 @@ A web-based multiplayer board game in the spirit of classic property-trading gam
 supernatural 1930s New York of Valve's _Deadlock_. Built for playing with friends while waiting in
 matchmaking queues: games persist across sessions and can be paused, resumed and ended early.
 
+**Play:** https://richual.volcaronitee8533.workers.dev
+
 > **Unofficial fan project.** Not affiliated with or endorsed by Valve Corporation. _Deadlock_ names
 > and lore belong to Valve. All artwork, icons and card text in this repository are original. This is
 > a non-commercial project; review Valve's and Hasbro's IP terms before making it publicly available.
