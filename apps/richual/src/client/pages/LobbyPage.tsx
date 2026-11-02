@@ -1,7 +1,7 @@
 import type { SessionResponse } from "@richual/protocol";
 import { Check, Link2 } from "lucide-react";
 import { type FormEvent, lazy, Suspense, useEffect, useRef, useState } from "react";
-import { claimSeat, joinLobby } from "../api";
+import { ApiError, claimSeat, joinLobby } from "../api";
 import { SeatTransfer } from "../components/SeatTransfer";
 import { type ConnectionStatus, connect, useConnection } from "../connection";
 import { navigate, seatCodeFromHash } from "../router";
@@ -66,6 +66,8 @@ function JoinForm({
   onJoined: (session: SessionResponse) => void;
 }) {
   const [name, setName] = useState(loadName);
+  // Null until the lobby says it needs a passcode; there is no way to ask beforehand.
+  const [passcode, setPasscode] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -74,11 +76,17 @@ function JoinForm({
     setBusy(true);
     setError(null);
     try {
-      const session = await joinLobby(code, name);
+      const session = await joinLobby(code, name, passcode?.trim() || undefined);
       saveName(name.trim());
       saveSession(session);
       onJoined(session);
     } catch (err) {
+      if (
+        err instanceof ApiError &&
+        (err.code === "passcode_required" || err.code === "wrong_passcode")
+      ) {
+        setPasscode((current) => current ?? "");
+      }
       setError(err instanceof Error ? err.message : "Could not join lobby");
     } finally {
       setBusy(false);
@@ -103,6 +111,19 @@ function JoinForm({
               autoComplete="nickname"
             />
           </Label>
+          {passcode !== null && (
+            <Label>
+              Passcode
+              <Input
+                value={passcode}
+                onChange={(e) => setPasscode(e.target.value)}
+                maxLength={20}
+                required
+                autoComplete="off"
+                autoFocus
+              />
+            </Label>
+          )}
           <Button type="submit" variant="primary" size="lg" disabled={busy || !name.trim()}>
             {busy ? "Joining…" : "Join"}
           </Button>

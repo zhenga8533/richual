@@ -18,3 +18,13 @@ export async function sha256Hex(input: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
   return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
 }
+
+/**
+ * Stored as "salt:hash". A plain salted hash is enough: the value never leaves the
+ * lobby's storage, and online guesses are capped by the lobby itself.
+ */
+export async function hashPasscode(passcode: string, salt = generateToken()): Promise<string> {
+  return `${salt}:${await sha256Hex(`${salt}:${passcode}`)}`;
+}
+
+export const passcodeSalt = (stored: string): string => stored.slice(0, stored.indexOf(":"));

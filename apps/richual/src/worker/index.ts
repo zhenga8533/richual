@@ -34,6 +34,8 @@ const errorStatus: Record<ErrorCode, ContentfulStatusCode> = {
   not_found: 404,
   forbidden: 403,
   lobby_full: 409,
+  passcode_required: 401,
+  wrong_passcode: 403,
   game_in_progress: 409,
   stale: 409,
   rejected: 422,
@@ -136,7 +138,7 @@ app.post("/api/lobbies/:code/join", async (c) => {
   const limited = await rateLimit(c.env, c.req.raw, ["joinLobby"]);
   if (limited) return limited;
 
-  const result = await c.env.LOBBY.getByName(code.data).join(body.data.name);
+  const result = await c.env.LOBBY.getByName(code.data).join(body.data.name, body.data.passcode);
   if (!result.ok) return c.json(errorBody(result.error, result.message), errorStatus[result.error]);
   return c.json(result.session, 201);
 });

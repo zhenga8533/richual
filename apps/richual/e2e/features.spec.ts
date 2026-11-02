@@ -137,8 +137,8 @@ test("a public lobby shows up in Browse for another player, who can join it", as
 }) => {
   const host = await newPlayer(browser);
   const url = await createLobby(host, "Opener");
-  await host.getByRole("switch", { name: /List publicly/ }).click();
-  await expect(host.getByRole("switch", { name: /List publicly/ })).toBeChecked();
+  await host.getByRole("combobox", { name: /Who can join/ }).selectOption("Public");
+  await expect(host.getByText("Anyone can join.")).toBeVisible();
 
   const stranger = await newPlayer(browser);
   await stranger.goto("/");
@@ -154,6 +154,41 @@ test("a public lobby shows up in Browse for another player, who can join it", as
   await listing.getByRole("button", { name: "Join" }).click();
   await expect(stranger).toHaveURL(url);
   await stranger.getByLabel("Your name").fill("Stranger");
+  await stranger.getByRole("button", { name: "Join" }).click();
+  await expect(host.getByText("Stranger")).toBeVisible();
+});
+
+test("a passcode lobby is listed with a lock and asks joiners for the passcode", async ({
+  browser,
+}) => {
+  const host = await newPlayer(browser);
+  await createLobby(host, "Gatekeeper");
+  await host.getByRole("combobox", { name: /Who can join/ }).selectOption("Public with passcode");
+  await host.getByRole("textbox", { name: "Passcode" }).fill("open sesame");
+  await host.getByRole("button", { name: "Set", exact: true }).click();
+  await expect(host.getByRole("button", { name: "Change passcode" })).toBeVisible();
+
+  const stranger = await newPlayer(browser);
+  await stranger.goto("/");
+  await stranger.getByRole("tab", { name: "Browse" }).click();
+  const listing = stranger
+    .getByRole("list", { name: "Public lobbies" })
+    .getByRole("listitem")
+    .filter({ hasText: "Gatekeeper's lobby" });
+  await expect(async () => {
+    await stranger.getByRole("button", { name: "Refresh public lobbies" }).click();
+    await expect(listing).toBeVisible({ timeout: 1_000 });
+  }).toPass({ timeout: 15_000 });
+  await expect(listing.getByLabel("Needs a passcode")).toBeVisible();
+  await listing.getByRole("button", { name: "Join" }).click();
+
+  await stranger.getByLabel("Your name").fill("Stranger");
+  await stranger.getByRole("button", { name: "Join" }).click();
+  await expect(stranger.getByRole("alert")).toHaveText("This lobby needs a passcode");
+  await stranger.getByLabel("Passcode").fill("wrong");
+  await stranger.getByRole("button", { name: "Join" }).click();
+  await expect(stranger.getByRole("alert")).toHaveText("That passcode isn't right");
+  await stranger.getByLabel("Passcode").fill("open sesame");
   await stranger.getByRole("button", { name: "Join" }).click();
   await expect(host.getByText("Stranger")).toBeVisible();
 });
