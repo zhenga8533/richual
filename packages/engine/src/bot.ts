@@ -1,6 +1,6 @@
 import { type BoardDefinition, getBoard, groupIndices, indicesOfKind, isOwnable } from "./board";
 import { checkAction, getLegalActions, type LegalView } from "./legal";
-import { mortgageValue, sealedTransferFee, standingRent, unsealCost } from "./rules";
+import { canBuild, mortgageValue, sealedTransferFee, standingRent, unsealCost } from "./rules";
 import type { Action, PlayerId, PlayerState, Trade } from "./state";
 
 /** Souls a Normal bot keeps in hand for rent before spending on anything optional. */
@@ -208,7 +208,7 @@ function improve(
   profile: Profile,
 ): Action | null {
   const toBuild = buildingWanted(state, board, me, profile.leverageTo);
-  if (toBuild !== null && me.cash - toBuild < reserve) {
+  if (toBuild !== null && me.cash - toBuild < reserve * profile.buildReserves) {
     const stray = legal
       .filter((a): a is Extract<Action, { type: "seal" }> => a.type === "seal")
       .filter((a) => !ownsWholeGroup(state, board, me.id, a.space))
@@ -272,7 +272,9 @@ export function spaceValue(
 
 /**
  * The cheapest building the bot still wants on its complete, unsealed sets
- * (below `upTo` Guardians), or null when there is nothing left to leverage for.
+ * (below `upTo` Guardians) and could place if only it had the cash, or null
+ * when there is nothing left to leverage for. Cash is ignored because raising
+ * it is the point; the bank's supply and even building are not.
  */
 function buildingWanted(
   state: LegalView,
@@ -280,13 +282,19 @@ function buildingWanted(
   me: PlayerState,
   upTo: number,
 ): number | null {
+  if (upTo === 0) return null;
+  const flush = {
+    ...state,
+    players: state.players.map((p) =>
+      p.id === me.id ? { ...p, cash: Number.MAX_SAFE_INTEGER } : p,
+    ),
+  };
   let cheapest: number | null = null;
   state.owners.forEach((owner, index) => {
     const space = board.spaces[index];
     if (owner !== me.id || space?.kind !== "property") return;
-    const group = groupIndices(board, space.group);
-    if (!group.every((i) => state.owners[i] === me.id && !state.sealed[i])) return;
     if ((state.buildings[index] ?? 0) >= upTo) return;
+    if (!canBuild(flush, board, me.id, index)) return;
     cheapest = cheapest === null ? space.buildCost : Math.min(cheapest, space.buildCost);
   });
   return cheapest;
@@ -319,18 +327,20 @@ function ownsWholeGroup(
   );
 }
 
-/** True when handing `index` to `to` would give them every property of its set. */
+/** True when handing all of `given` to `to` would give them every property of some set. */
 function completesSetFor(
   state: LegalView,
   board: BoardDefinition,
   to: PlayerId,
-  index: number,
+  given: readonly number[],
 ): boolean {
-  const space = board.spaces[index];
-  return (
-    space?.kind === "property" &&
-    groupIndices(board, space.group).every((i) => i === index || state.owners[i] === to)
-  );
+  return given.some((index) => {
+    const space = board.spaces[index];
+    return (
+      space?.kind === "property" &&
+      groupIndices(board, space.group).every((i) => given.includes(i) || state.owners[i] === to)
+    );
+  });
 }
 
 /**
@@ -368,7 +378,7 @@ function tradeRatio(
     }, 0) +
     given.getOutCards.length * cardValue;
   const ratio = gain / Math.max(1, loss);
-  const handsOverSet = given.spaces.some((i) => completesSetFor(state, board, trade.from, i));
+  const handsOverSet = completesSetFor(state, board, trade.from, given.spaces);
   if (handsOverSet && profile.rivalSetRatio !== null) {
     return (ratio * profile.acceptRatio) / profile.rivalSetRatio;
   }
@@ -402,7 +412,7 @@ function setCompletingOffer(
     if (!owner || owner === me.id || !space || !isOwnable(space)) continue;
     if (state.trades.some((t) => t.from === me.id && t.request.spaces.includes(target))) continue;
     const price = Math.round(space.price * offers.multiple);
-    const swap = offers.swaps ? spareFor(state, board, me, owner, group) : undefined;
+    const swap = offers.swaps ? spareFor(state, board, me, owner, group, price) : undefined;
     const cash = Math.max(0, price - (swap?.worth ?? 0));
     if (me.cash - cash < reserve) continue;
     const offer: Action = {
@@ -419,7 +429,8 @@ function setCompletingOffer(
 /**
  * A property the bot can give away without hurting itself or handing the
  * recipient a set: unbuilt, unsealed, outside the wanted group and the only one
- * the bot holds in its own group. Its printed price counts towards the offer.
+ * the bot holds in its own group. Its printed price counts towards the offer, so
+ * the dearest one that doesn't exceed `price` is chosen; giving more would overpay.
  */
 function spareFor(
   state: LegalView,
@@ -427,6 +438,7 @@ function spareFor(
   me: PlayerState,
   to: PlayerId,
   wantedGroup: string,
+  price: number,
 ): { index: number; worth: number } | undefined {
   return state.owners
     .flatMap((owner, index) => {
@@ -436,7 +448,8 @@ function spareFor(
       const mineInGroup = groupIndices(board, space.group).filter(
         (i) => state.owners[i] === me.id,
       ).length;
-      if (mineInGroup > 1 || completesSetFor(state, board, to, index)) return [];
+      if (mineInGroup > 1 || completesSetFor(state, board, to, [index])) return [];
+      if (space.price > price) return [];
       return [{ index, worth: space.price }];
     })
     .sort((x, y) => y.worth - x.worth)[0];

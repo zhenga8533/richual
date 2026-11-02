@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { getBoard } from "../src/board";
 import { BOT_RESERVE, botAction } from "../src/bot";
 import { checkAction } from "../src/legal";
 import { WALKER } from "../src/rules";
@@ -211,6 +212,23 @@ describe("bot levels", () => {
     expect(botAction(s, "a", "normal")).toEqual({ type: "roll" });
   });
 
+  it("Hard doesn't seal for buildings the bank can't supply", () => {
+    const s = newGame(2);
+    own(s, "a", 37, 39, 5);
+    player(s, "a").cash = 300;
+    // b holds every Guardian in the bank on the other sets.
+    const board = getBoard(s.config.boardId);
+    let guardians = 0;
+    board.spaces.forEach((space, index) => {
+      if (space.kind !== "property" || [37, 39].includes(index)) return;
+      if (guardians >= board.guardianSupply) return;
+      own(s, "b", index);
+      s.buildings[index] = 4;
+      guardians += 4;
+    });
+    expect(botAction(s, "a", "hard")).toEqual({ type: "roll" });
+  });
+
   it("Hard leaves the seal on until its set is built up", () => {
     const s = newGame(2);
     own(s, "a", 37, 39, 5);
@@ -236,6 +254,22 @@ describe("bot levels", () => {
     expect(botAction(offered(130), "a", "hard")).toEqual({ type: "acceptTrade", tradeId: 1 });
   });
 
+  it("Hard also counts a set that two properties in one trade complete together", () => {
+    const offered = (cash: number) => {
+      const s = newGame(2);
+      own(s, "b", 6);
+      own(s, "a", 8, 9);
+      return apply(s, "b", {
+        type: "proposeTrade",
+        to: "a",
+        offer: bundle({ cash }),
+        request: bundle({ spaces: [8, 9] }),
+      }).state;
+    };
+    expect(botAction(offered(300), "a", "normal")).toEqual({ type: "acceptTrade", tradeId: 1 });
+    expect(botAction(offered(300), "a", "hard")).toEqual({ type: "rejectTrade", tradeId: 1 });
+  });
+
   it("Hard can offer a spare property towards the last one of a set", () => {
     const s = newGame(2);
     own(s, "a", 1, 6);
@@ -250,5 +284,18 @@ describe("bot levels", () => {
       request: { spaces: [3] },
     });
     expect(checkAction(s, "a", offer as never)).toBeNull();
+  });
+
+  it("Hard won't give a property worth more than the one it wants", () => {
+    const s = newGame(2);
+    own(s, "a", 1, 39);
+    own(s, "b", 3);
+    s.phase = { kind: "awaitingEndTurn" };
+    s.turn.round = 2;
+    expect(botAction(s, "a", "hard")).toMatchObject({
+      type: "proposeTrade",
+      offer: { cash: 120, spaces: [] },
+      request: { spaces: [3] },
+    });
   });
 });
