@@ -2,7 +2,7 @@
 // loading Zod or the engine.
 
 /** Bumped on any breaking change to the wire format; clients on another version must reload. */
-export const PROTOCOL_VERSION = 7;
+export const PROTOCOL_VERSION = 8;
 
 /** Crockford base32 without I, L, O, U to avoid confusable characters in invite codes. */
 export const LOBBY_CODE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";

@@ -24,21 +24,28 @@ export class DirectoryDO extends DurableObject<Env> {
          updated_at INTEGER NOT NULL
        );`,
     );
+    const columns = ctx.storage.sql
+      .exec<{ name: string }>("SELECT name FROM pragma_table_info('listings')")
+      .toArray();
+    if (!columns.some((c) => c.name === "locked")) {
+      ctx.storage.sql.exec("ALTER TABLE listings ADD COLUMN locked INTEGER NOT NULL DEFAULT 0");
+    }
   }
 
   async upsert(listing: Listing): Promise<void> {
     this.ctx.storage.sql.exec(
-      `INSERT INTO listings (code, host_name, players, max_players, mode, speed_die, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO listings (code, host_name, players, max_players, mode, speed_die, locked, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(code) DO UPDATE SET host_name = excluded.host_name, players = excluded.players,
          max_players = excluded.max_players, mode = excluded.mode, speed_die = excluded.speed_die,
-         updated_at = excluded.updated_at`,
+         locked = excluded.locked, updated_at = excluded.updated_at`,
       listing.code,
       listing.hostName,
       listing.players,
       listing.maxPlayers,
       listing.mode,
       listing.speedDie ? 1 : 0,
+      listing.locked ? 1 : 0,
       Date.now(),
     );
   }
@@ -59,6 +66,7 @@ export class DirectoryDO extends DurableObject<Env> {
         max_players: number;
         mode: string;
         speed_die: number;
+        locked: number;
         updated_at: number;
       }>("SELECT * FROM listings ORDER BY updated_at DESC LIMIT ?", limit)
       .toArray()
@@ -69,6 +77,7 @@ export class DirectoryDO extends DurableObject<Env> {
         maxPlayers: row.max_players,
         mode: row.mode === "quick" ? "quick" : "classic",
         speedDie: row.speed_die === 1,
+        locked: row.locked === 1,
         updatedAt: row.updated_at,
       }));
   }

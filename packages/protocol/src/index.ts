@@ -26,7 +26,19 @@ export const PlayerName = z
 export const CreateLobbyRequest = z.object({ name: PlayerName });
 export type CreateLobbyRequest = z.infer<typeof CreateLobbyRequest>;
 
-export const JoinLobbyRequest = z.object({ name: PlayerName });
+/** What a host sets so only people they tell can join; never sent back to clients. */
+export const Passcode = z
+  .string()
+  .trim()
+  .min(4, "Passcode must be at least 4 characters")
+  .max(20, "Passcode must be at most 20 characters")
+  .refine((s) => !/\p{Cc}/u.test(s), "Passcode contains invalid characters");
+
+export const JoinLobbyRequest = z.object({
+  name: PlayerName,
+  /** Checked only by lobbies that need one; compared as typed, after trimming. */
+  passcode: z.string().trim().max(64).optional(),
+});
 export type JoinLobbyRequest = z.infer<typeof JoinLobbyRequest>;
 
 /** A one-time code, shown on one device, that moves that player's seat to another. */
@@ -88,6 +100,8 @@ export type PublicLobby = {
   maxPlayers: number;
   mode: "classic" | "quick";
   speedDie: boolean;
+  /** Joining needs the host's passcode. */
+  locked: boolean;
   updatedAt: number;
 };
 
@@ -104,6 +118,9 @@ export const ErrorCode = z.enum([
   "bad_request",
   "not_found",
   "lobby_full",
+  /** The lobby needs a passcode and none was given. */
+  "passcode_required",
+  "wrong_passcode",
   "unauthorized",
   "forbidden",
   "protocol_mismatch",
@@ -140,8 +157,11 @@ export const LobbySettings = z.object({
   evenBuilding: z.boolean().default(true),
   /** A third die from round 2 on; the Quick preset turns it on. */
   speedDie: z.boolean().default(false),
-  /** Public lobbies are listed for anyone to join while they wait for players. */
-  visibility: z.enum(["private", "public"]).default("private"),
+  /**
+   * Public lobbies are listed while they wait for players; "passcode" ones are listed
+   * too, but joining them needs the host's passcode.
+   */
+  visibility: z.enum(["private", "public", "passcode"]).default("private"),
   mode: z.enum(["classic", "quick"]).default("classic"),
   /** When the game is scored if nobody has won outright. */
   limit: z
@@ -282,7 +302,12 @@ export const ClientMessage = z.discriminatedUnion("type", [
     token: z.string().min(1).max(128),
   }),
   z.object({ type: z.literal("setHero"), hero: HeroId }),
-  z.object({ type: z.literal("updateSettings"), settings: LobbySettings }),
+  z.object({
+    type: z.literal("updateSettings"),
+    settings: LobbySettings,
+    /** Sets a new passcode; required when first switching to "passcode", kept otherwise. */
+    passcode: Passcode.optional(),
+  }),
   z.object({ type: z.literal("startGame") }),
   z.object({ type: z.literal("returnToLobby") }),
   z.object({ type: z.literal("pause") }),

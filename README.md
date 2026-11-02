@@ -22,7 +22,8 @@ matchmaking queues: games persist across sessions and can be paused, resumed and
 - Reconnect from the same browser at any time, or move your seat to another device with a
   one-time code or QR; games are kept for 7 days of inactivity
 - **Your games** on the landing page lists every lobby this browser has a seat in
-- Optional public lobbies, listed on the Browse tab while they wait for players
+- Optional public lobbies, listed on the Browse tab while they wait for players, with an optional
+  passcode
 - Per-client rate limits and a daily cap on new lobbies keep the free tier from being exhausted
 - Chat, turn alerts, and a layout that works on a second monitor or a phone
 
@@ -105,6 +106,8 @@ Everything runs within the Cloudflare Workers free plan at friend-group scale. S
 - **A directory Durable Object** holds the public lobbies. A lobby lists itself while it is
   public, waiting, not full and its host is connected, and takes itself down otherwise; listings
   older than two hours are pruned in case a lobby vanished without saying so.
+- **Passcodes** are stored as a salted hash and never sent to clients. Each lobby counts wrong
+  guesses and refuses every join for 10 minutes after 10 of them.
 - **The landing page stays small** (about 90 KB gzip): it never loads Zod or the engine, and
   `pnpm build` fails if its scripts pass 100 KB.
 - **Client errors** are reported to `POST /api/client-errors` and appear in Workers logs, as does a

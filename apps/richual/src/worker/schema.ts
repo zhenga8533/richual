@@ -59,6 +59,9 @@ const MIGRATIONS: readonly string[] = [
    ALTER TABLE players ADD COLUMN seat_code_expires_at INTEGER;
    ALTER TABLE lobby ADD COLUMN bot_due_at INTEGER;`,
   `ALTER TABLE players ADD COLUMN bot_level TEXT;`,
+  `ALTER TABLE lobby ADD COLUMN passcode_hash TEXT;
+   ALTER TABLE lobby ADD COLUMN passcode_failures INTEGER NOT NULL DEFAULT 0;
+   ALTER TABLE lobby ADD COLUMN passcode_failed_at INTEGER;`,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;
@@ -83,7 +86,10 @@ const CURRENT_SCHEMA = `
     resumed_at INTEGER,
     action_deadline INTEGER,
     host_check_at INTEGER,
-    bot_due_at INTEGER
+    bot_due_at INTEGER,
+    passcode_hash TEXT,
+    passcode_failures INTEGER NOT NULL DEFAULT 0,
+    passcode_failed_at INTEGER
   );
   CREATE TABLE players (
     id TEXT PRIMARY KEY,

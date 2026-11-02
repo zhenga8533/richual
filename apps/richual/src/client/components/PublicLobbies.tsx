@@ -1,5 +1,5 @@
 import type { PublicLobby } from "@richual/protocol";
-import { RefreshCw } from "lucide-react";
+import { Lock, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { fetchPublicLobbies } from "../api";
 import { lobbyPath, navigate } from "../router";
@@ -30,7 +30,7 @@ export function PublicLobbies() {
   return (
     <div className="flex flex-col gap-2 p-3 pt-4">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-muted">Open lobbies anyone can join</p>
+        <p className="text-sm text-muted">Lobbies waiting for players</p>
         <Button
           variant="ghost"
           size="sm"
@@ -49,7 +49,7 @@ export function PublicLobbies() {
       )}
       {lobbies && lobbies.length === 0 && !error && (
         <p className="rounded-lg bg-surface-2 px-3 py-4 text-center text-sm text-muted">
-          No public lobbies right now. Create one and switch on “List publicly”.
+          No public lobbies right now. Create one and set “Who can join” to Public.
         </p>
       )}
       {lobbies && lobbies.length > 0 && (
@@ -60,7 +60,12 @@ export function PublicLobbies() {
               className="flex items-center gap-3 border-b border-line py-2 last:border-0"
             >
               <span className="flex min-w-0 flex-1 flex-col">
-                <span className="truncate text-sm font-medium">{l.hostName}'s lobby</span>
+                <span className="flex items-center gap-1.5 text-sm font-medium">
+                  <span className="truncate">{l.hostName}'s lobby</span>
+                  {l.locked && (
+                    <Lock className="size-3.5 shrink-0 text-muted" aria-label="Needs a passcode" />
+                  )}
+                </span>
                 <span className="text-xs text-muted">
                   {l.players}/{l.maxPlayers} players · {l.mode === "quick" ? "Quick" : "Classic"}
                   {l.speedDie ? " · Speed Die" : ""}

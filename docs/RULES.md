@@ -109,6 +109,10 @@ a 20-round limit.
     it needs.
 - **Your games** on the start page lists every lobby you have a seat in on this device. **Forget**
   only removes it from the list; you stay in the game.
-- A host can **list a lobby publicly**. It appears on the **Browse** tab while it is waiting for
-  players, has room and the host is online, and disappears once the game starts.
+- **Who can join** is set by the host:
+  - **Private** (the default): anyone with the invite link or code.
+  - **Public**: the lobby appears on the **Browse** tab while it is waiting for players, has room
+    and the host is online, and disappears once the game starts.
+  - **Public with passcode**: listed the same way, with a lock, but joining needs the passcode the
+    host chose. Players already in the lobby never need it, even when they rejoin.
 - After a game, **Rematch** starts a new one with the same players and rules.

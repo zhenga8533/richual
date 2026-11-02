@@ -5,15 +5,15 @@ import {
   MAX_PLAYERS,
   TURN_TIMER_OPTIONS,
 } from "@richual/protocol";
-import { Bot, ChevronDown } from "lucide-react";
-import type { ReactNode } from "react";
+import { Bot, ChevronDown, KeyRound } from "lucide-react";
+import { type FormEvent, type ReactNode, useState } from "react";
 import { BOT_LEVEL_OPTIONS, botLevelLabel } from "../botLevels";
 import { send, useConnection } from "../connection";
 import { SOULS } from "../theme";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
-import { Select } from "../ui/field";
+import { Input, Select } from "../ui/field";
 import { MenuContent, MenuItem, MenuRoot, MenuTrigger, Switch } from "../ui/radix";
 import { ChatPanel } from "./ChatPanel";
 import { CloseLobbyButton } from "./CloseLobbyButton";
@@ -187,12 +187,7 @@ export function Setup({ lobby }: { lobby: LobbySnapshot }) {
               <option value="quick">Quick</option>
             </Select>
           </Row>
-          <Toggle
-            label="List publicly: anyone can find and join this lobby while it's waiting for players"
-            checked={settings.visibility === "public"}
-            disabled={!isHost}
-            onChange={(listed) => updateSettings({ visibility: listed ? "public" : "private" })}
-          />
+          <WhoCanJoin settings={settings} isHost={isHost} />
           <Row
             label="Game length"
             hint={
@@ -304,6 +299,94 @@ export function Setup({ lobby }: { lobby: LobbySnapshot }) {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+type Visibility = LobbySettings["visibility"];
+const VISIBILITY_OPTIONS: { value: Visibility; label: string; hint: string }[] = [
+  {
+    value: "private",
+    label: "Private",
+    hint: "Only people with the invite link or code can join.",
+  },
+  {
+    value: "public",
+    label: "Public",
+    hint: "Listed on the Browse tab while it waits for players. Anyone can join.",
+  },
+  {
+    value: "passcode",
+    label: "Public with passcode",
+    hint: "Listed on the Browse tab, but joining needs the passcode.",
+  },
+];
+
+/** Switching to a passcode only takes effect once the host has typed one. */
+function WhoCanJoin({ settings, isHost }: { settings: LobbySettings; isHost: boolean }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const editing = draft !== null;
+  const choice = editing ? "passcode" : settings.visibility;
+  const passcode = draft?.trim() ?? "";
+
+  const onPick = (visibility: Visibility) => {
+    if (visibility === "passcode") {
+      setDraft("");
+      return;
+    }
+    setDraft(null);
+    send({ type: "updateSettings", settings: { ...settings, visibility } });
+  };
+  const onSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    send({
+      type: "updateSettings",
+      settings: { ...settings, visibility: "passcode" },
+      passcode,
+    });
+    setDraft(null);
+  };
+
+  return (
+    <>
+      <Row label="Who can join" hint={VISIBILITY_OPTIONS.find((o) => o.value === choice)?.hint}>
+        <Select
+          value={choice}
+          disabled={!isHost}
+          onChange={(e) => onPick(e.target.value as Visibility)}
+        >
+          {VISIBILITY_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </Select>
+      </Row>
+      {isHost && editing && (
+        <form onSubmit={onSubmit} className="flex gap-2 pb-1.5">
+          <Input
+            aria-label="Passcode"
+            placeholder="Passcode (4–20 characters)"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            maxLength={20}
+            autoComplete="off"
+            autoFocus
+          />
+          <Button type="submit" variant="primary" disabled={passcode.length < 4}>
+            Set
+          </Button>
+          <Button variant="ghost" onClick={() => setDraft(null)}>
+            Cancel
+          </Button>
+        </form>
+      )}
+      {isHost && !editing && settings.visibility === "passcode" && (
+        <Button variant="ghost" size="sm" className="self-start" onClick={() => setDraft("")}>
+          <KeyRound />
+          Change passcode
+        </Button>
+      )}
+    </>
   );
 }
 

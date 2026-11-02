@@ -35,7 +35,7 @@ import {
   type ServerMessage,
   type SessionResponse,
 } from "@richual/protocol";
-import { generateLobbyCode, generateToken, sha256Hex } from "./crypto";
+import { generateLobbyCode, generateToken, hashPasscode, passcodeSalt, sha256Hex } from "./crypto";
 import type { Listing } from "./directory";
 import { createSchema, isInitialized, migrate } from "./schema";
 
@@ -46,6 +46,9 @@ export const HELLO_TIMEOUT_MS = 5_000;
 export const HOST_GRACE_MS = 2 * 60 * 1000;
 /** Pause before each bot move, so people can follow what the bot did. */
 export const BOT_DELAY_MS = 900;
+/** Wrong passcodes a lobby accepts per window before every join has to wait it out. */
+export const PASSCODE_MAX_FAILURES = 10;
+export const PASSCODE_WINDOW_MS = 10 * 60 * 1000;
 const CHAT_HISTORY = 30;
 /** Event batches (one per state change) kept for reconnecting clients' logs. */
 const EVENT_HISTORY = 40;
@@ -76,6 +79,9 @@ type LobbyRow = {
   action_deadline: number | null;
   host_check_at: number | null;
   bot_due_at: number | null;
+  passcode_hash: string | null;
+  passcode_failures: number;
+  passcode_failed_at: number | null;
 };
 type PlayerRow = {
   id: string;
@@ -140,15 +146,19 @@ export class LobbyDO extends DurableObject<Env> {
     return { code, playerId, token };
   }
 
-  async join(name: string): Promise<JoinResult> {
+  async join(name: string, passcode?: string): Promise<JoinResult> {
     const token = generateToken();
     const tokenHash = await sha256Hex(token);
+    const stored = this.lobby()?.passcode_hash;
+    const attempt = stored && passcode ? await hashPasscode(passcode, passcodeSalt(stored)) : null;
     // Everything below is synchronous, so concurrent joins cannot claim the same seat.
     const lobby = this.lobby();
     if (!lobby) return { ok: false, error: "not_found", message: "Lobby not found" };
     if (lobby.status !== "open") {
       return { ok: false, error: "game_in_progress", message: "This game has already started" };
     }
+    const refused = this.checkPasscode(lobby, passcode, attempt);
+    if (refused) return refused;
 
     const taken = new Set(this.players().map((p) => p.seat));
     const seat = Array.from({ length: MAX_PLAYERS }, (_, i) => i).find((i) => !taken.has(i));
@@ -237,7 +247,7 @@ export class LobbyDO extends DurableObject<Env> {
           this.setHero(playerId, msg.hero);
           break;
         case "updateSettings":
-          this.updateSettings(playerId, msg.settings);
+          await this.updateSettings(playerId, msg.settings, msg.passcode);
           break;
         case "startGame":
           this.startGame(playerId);
@@ -304,7 +314,7 @@ export class LobbyDO extends DurableObject<Env> {
   private async deleteLobby(reason: string): Promise<void> {
     const lobby = this.requireLobby();
     const { code } = lobby;
-    if (parseSettings(lobby.settings_json).visibility === "public") {
+    if (parseSettings(lobby.settings_json).visibility !== "private") {
       await this.directory()
         .remove(code)
         .catch((error: unknown) => console.error("directory remove failed", code, error));
@@ -434,20 +444,73 @@ export class LobbyDO extends DurableObject<Env> {
     this.broadcast([]);
   }
 
-  private updateSettings(playerId: string, settings: LobbySettings): void {
+  private async updateSettings(
+    playerId: string,
+    settings: LobbySettings,
+    passcode: string | undefined,
+  ): Promise<void> {
+    const newHash = passcode === undefined ? undefined : await hashPasscode(passcode);
     this.requireHost(playerId);
     const lobby = this.requireStatus("open");
+    const hash = settings.visibility === "passcode" ? (newHash ?? lobby.passcode_hash) : null;
+    if (settings.visibility === "passcode" && !hash) {
+      throw new RequestError("rejected", "Choose a passcode first");
+    }
     // After a wake-up the lobby doesn't know it was listed; make the next sync remove it.
     if (
       settings.visibility === "private" &&
-      parseSettings(lobby.settings_json).visibility === "public" &&
+      parseSettings(lobby.settings_json).visibility !== "private" &&
       this.listedAs === undefined
     ) {
       this.listedAs = "unknown";
     }
     this.sql.exec("UPDATE lobby SET settings_json = ? WHERE id = 1", JSON.stringify(settings));
+    if (hash !== lobby.passcode_hash) {
+      this.sql.exec(
+        "UPDATE lobby SET passcode_hash = ?, passcode_failures = 0, passcode_failed_at = NULL WHERE id = 1",
+        hash,
+      );
+    }
     this.bumpVersion(Date.now());
     this.broadcast([]);
+  }
+
+  /**
+   * Refuses a join without the right passcode, counting wrong ones. After
+   * PASSCODE_MAX_FAILURES in a window every join waits, so guessing stays slow.
+   */
+  private checkPasscode(
+    lobby: LobbyRow,
+    passcode: string | undefined,
+    attempt: string | null,
+  ): JoinResult | null {
+    if (!lobby.passcode_hash) return null;
+    const now = Date.now();
+    const windowOpen =
+      lobby.passcode_failed_at !== null && now - lobby.passcode_failed_at < PASSCODE_WINDOW_MS;
+    if (windowOpen && lobby.passcode_failures >= PASSCODE_MAX_FAILURES) {
+      const minutes = Math.ceil(
+        ((lobby.passcode_failed_at ?? now) + PASSCODE_WINDOW_MS - now) / 60_000,
+      );
+      return {
+        ok: false,
+        error: "rate_limited",
+        message: `Too many wrong passcodes. Try again in ${minutes} minute${minutes === 1 ? "" : "s"}.`,
+      };
+    }
+    if (!passcode) {
+      return { ok: false, error: "passcode_required", message: "This lobby needs a passcode" };
+    }
+    if (attempt === lobby.passcode_hash) return null;
+    if (windowOpen) {
+      this.sql.exec("UPDATE lobby SET passcode_failures = passcode_failures + 1 WHERE id = 1");
+    } else {
+      this.sql.exec(
+        "UPDATE lobby SET passcode_failures = 1, passcode_failed_at = ? WHERE id = 1",
+        now,
+      );
+    }
+    return { ok: false, error: "wrong_passcode", message: "That passcode isn't right" };
   }
 
   private startGame(playerId: string): void {
@@ -943,7 +1006,8 @@ export class LobbyDO extends DurableObject<Env> {
     return this.sql
       .exec<LobbyRow>(
         `SELECT code, host_id, last_active_at, status, settings_json, version, paused, play_ms,
-                resumed_at, action_deadline, host_check_at, bot_due_at
+                resumed_at, action_deadline, host_check_at, bot_due_at, passcode_hash,
+                passcode_failures, passcode_failed_at
            FROM lobby WHERE id = 1`,
       )
       .toArray()[0];
@@ -1125,7 +1189,7 @@ export class LobbyDO extends DurableObject<Env> {
     const players = this.players();
     const host = players.find((p) => p.id === lobby.host_id);
     const listing: Listing | null =
-      settings.visibility === "public" &&
+      settings.visibility !== "private" &&
       lobby.status === "open" &&
       players.length < MAX_PLAYERS &&
       host &&
@@ -1137,6 +1201,7 @@ export class LobbyDO extends DurableObject<Env> {
             maxPlayers: MAX_PLAYERS,
             mode: settings.mode,
             speedDie: settings.speedDie,
+            locked: settings.visibility === "passcode",
           }
         : null;
     const key = listing ? JSON.stringify(listing) : null;
