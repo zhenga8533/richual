@@ -22,7 +22,8 @@ matchmaking queues: games persist across sessions and can be paused, resumed and
 - Optional Speed Die (on in Quick mode)
 - Reconnect from the same browser at any time, or move your seat to another device with a
   one-time code or QR; games are kept for 7 days of inactivity
-- **Your games** on the landing page lists every lobby this browser has a seat in
+- **Your games** on the landing page lists every lobby this browser has a seat in; hosts can close
+  a lobby from there too
 - Optional public lobbies, listed on the Browse tab while they wait for players, with an optional
   passcode; an invite link says straight away if its lobby is gone, started or full
 - Per-client rate limits and a daily cap on new lobbies keep the free tier from being exhausted

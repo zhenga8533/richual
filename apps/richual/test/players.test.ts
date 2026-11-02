@@ -3,6 +3,7 @@ import { env, exports } from "cloudflare:workers";
 import { botAction } from "@richual/engine";
 import { CloseCode, type LobbySnapshot, type SessionResponse } from "@richual/protocol";
 import { describe, expect, it } from "vitest";
+import { LIMITS } from "../src/worker/gatekeeper";
 import { BASE, connect, createLobby, hello, joinLobby, post, type TestSocket } from "./helpers";
 
 async function hostWithBot() {
@@ -172,6 +173,41 @@ describe("host tools", () => {
     const guest = await connect(await joinLobby(hostSession.code, "Guest"));
     guest.socket.send({ type: "closeLobby" });
     expect(await guest.socket.until("error")).toMatchObject({ error: "forbidden" });
+  });
+
+  it("lets the host close the lobby from outside it, with their saved token", async () => {
+    const hostSession = await createLobby("Host");
+    const { socket: guest } = await connect(await joinLobby(hostSession.code, "Guest"));
+    const res = await post(`/api/lobbies/${hostSession.code}/close`, { token: hostSession.token });
+    expect(res.status).toBe(204);
+    expect((await guest.closed).code).toBe(CloseCode.LobbyClosed);
+    const again = await post(`/api/lobbies/${hostSession.code}/close`, {
+      token: hostSession.token,
+    });
+    expect(again.status).toBe(404);
+  });
+
+  it("refuses to close a lobby for a guest, a wrong token or a malformed request", async () => {
+    const hostSession = await createLobby("Host");
+    const guestSession = await joinLobby(hostSession.code, "Guest");
+    const close = (body: unknown) => post(`/api/lobbies/${hostSession.code}/close`, body);
+    expect((await close({ token: guestSession.token })).status).toBe(403);
+    expect((await close({ token: "not-a-seat" })).status).toBe(401);
+    expect((await close({})).status).toBe(400);
+    // Nothing was deleted along the way.
+    expect((await joinLobby(hostSession.code, "Late")).code).toBe(hostSession.code);
+  });
+
+  it("rate-limits closing from outside the lobby", async () => {
+    const ip = "203.0.113.140";
+    const close = () =>
+      exports.default.fetch(`${BASE}/api/lobbies/ABC234/close`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "CF-Connecting-IP": ip },
+        body: JSON.stringify({ token: "t" }),
+      });
+    for (let i = 0; i < LIMITS.closeLobby.limit; i++) expect((await close()).status).toBe(404);
+    expect((await close()).status).toBe(429);
   });
 
   it("removes a player before the game and closes their socket", async () => {

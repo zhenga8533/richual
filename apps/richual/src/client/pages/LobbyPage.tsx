@@ -1,4 +1,10 @@
-import { type LobbyInfo, MAX_PLAYERS, type SessionResponse } from "@richual/protocol";
+import {
+  CloseCode,
+  type LobbyInfo,
+  type LobbySnapshot,
+  MAX_PLAYERS,
+  type SessionResponse,
+} from "@richual/protocol";
 import { Check, Link2 } from "lucide-react";
 import { type FormEvent, lazy, Suspense, useEffect, useRef, useState } from "react";
 import { ApiError, claimSeat, fetchLobbyInfo, joinLobby } from "../api";
@@ -87,12 +93,9 @@ function JoinForm({
     };
   }, [code]);
 
-  const unavailable =
+  const unavailable: NoticeText | null =
     info === null
-      ? {
-          title: "This lobby no longer exists",
-          detail: "Its host closed it, or it expired after a week without play.",
-        }
+      ? LOBBY_GONE
       : info?.status === "playing"
         ? {
             title: "This game has already started",
@@ -106,22 +109,7 @@ function JoinForm({
           : info?.full
             ? { title: "This lobby is full", detail: `All ${MAX_PLAYERS} seats are taken.` }
             : null;
-  if (unavailable) {
-    return (
-      <div className="flex w-full max-w-sm flex-1 flex-col justify-center py-8">
-        <Card className="flex flex-col gap-4 p-5">
-          <div>
-            <p className="font-mono text-sm tracking-[0.25em] text-muted">{code}</p>
-            <h1 className="text-xl font-semibold">{unavailable.title}</h1>
-            <p className="mt-1 text-sm text-muted">{unavailable.detail}</p>
-          </div>
-          <Button variant="primary" onClick={() => navigate("/")}>
-            Back to start
-          </Button>
-        </Card>
-      </div>
-    );
-  }
+  if (unavailable) return <Notice code={code} {...unavailable} />;
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -195,7 +183,7 @@ function JoinForm({
 }
 
 function Lobby({ session }: { session: SessionResponse }) {
-  const { status, lobby, error } = useConnection();
+  const { status, lobby, playerId, closeCode } = useConnection();
   const [copied, setCopied] = useState(false);
 
   useEffect(() => connect(session), [session]);
@@ -209,6 +197,10 @@ function Lobby({ session }: { session: SessionResponse }) {
       // Clipboard access can be denied; the code stays visible to share by hand.
     }
   };
+
+  if (status === "closed") {
+    return <Notice code={session.code} {...endedNotice(closeCode, lobby, playerId)} />;
+  }
 
   const game = lobby && lobby.status !== "open" ? lobby.game : null;
 
@@ -230,23 +222,95 @@ function Lobby({ session }: { session: SessionResponse }) {
         </div>
       )}
 
-      {error && (
-        <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">
-          {error}
-        </p>
-      )}
-
       {lobby && (
         <Suspense fallback={<p className="py-16 text-center text-muted">Loading…</p>}>
           {game ? <GameView lobby={lobby} game={game} /> : <Setup lobby={lobby} />}
         </Suspense>
       )}
+    </div>
+  );
+}
 
-      {status === "closed" && (
-        <Button variant="outline" className="self-start" onClick={() => navigate("/")}>
+type NoticeText = {
+  title: string;
+  detail: string;
+  action?: { label: string; onClick: () => void };
+};
+
+const reload = { label: "Reload", onClick: () => location.reload() };
+
+/** What to tell a player whose connection the server ended for good. */
+function endedNotice(
+  closeCode: number | null,
+  lobby: LobbySnapshot | null,
+  playerId: string | null,
+): NoticeText {
+  switch (closeCode) {
+    case CloseCode.LobbyClosed:
+      // No snapshot means the lobby was already gone when this page connected.
+      if (!lobby) return LOBBY_GONE;
+      return lobby.hostId === playerId
+        ? { title: "You closed this lobby", detail: "The game and its code are gone for everyone." }
+        : { title: "The host closed this lobby", detail: "The game and its code are gone." };
+    case CloseCode.Removed:
+      return {
+        title: "You're no longer in this lobby",
+        detail: "The host removed you or gave your seat to a bot.",
+      };
+    case CloseCode.SeatMoved:
+      return {
+        title: "Your seat moved to another device",
+        detail: "Keep playing there. You can move it back from that device the same way.",
+      };
+    case CloseCode.Replaced:
+      return {
+        title: "This lobby is open in another tab",
+        detail: "Keep playing there, or reload to play here instead.",
+        action: reload,
+      };
+    case CloseCode.ProtocolMismatch:
+      return {
+        title: "Richual has been updated",
+        detail: "Reload to get the new version.",
+        action: reload,
+      };
+    default:
+      return {
+        title: "Your seat here is no longer valid",
+        detail: "It may have moved to another device, or the lobby may have changed.",
+      };
+  }
+}
+
+const LOBBY_GONE: NoticeText = {
+  title: "This lobby no longer exists",
+  detail: "Its host closed it, or it expired after a week without play.",
+};
+
+/** A full-page message in place of the lobby, for when it can't be joined or played. */
+function Notice({ code, title, detail, action }: NoticeText & { code: string }) {
+  // Moving focus announces the change, which otherwise replaces the page silently.
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => heading.current?.focus(), []);
+  return (
+    <div className="flex w-full max-w-sm flex-1 flex-col justify-center py-8">
+      <Card className="flex flex-col gap-4 p-5">
+        <div>
+          <p className="font-mono text-sm tracking-[0.25em] text-muted">{code}</p>
+          <h1 ref={heading} tabIndex={-1} className="text-xl font-semibold outline-none">
+            {title}
+          </h1>
+          <p className="mt-1 text-sm text-muted">{detail}</p>
+        </div>
+        {action && (
+          <Button variant="primary" onClick={action.onClick}>
+            {action.label}
+          </Button>
+        )}
+        <Button variant={action ? "outline" : "primary"} onClick={() => navigate("/")}>
           Back to start
         </Button>
-      )}
+      </Card>
     </div>
   );
 }

@@ -2,6 +2,7 @@ import {
   CLIENT_ERROR_MAX_BYTES,
   ClaimSeatRequest,
   ClientErrorReport,
+  CloseLobbyRequest,
   CreateLobbyRequest,
   type ErrorCode,
   type ErrorResponse,
@@ -174,6 +175,19 @@ app.post("/api/lobbies/:code/claim", async (c) => {
   const result = await c.env.LOBBY.getByName(code.data).claimSeat(body.data.seatCode);
   if (!result.ok) return c.json(errorBody(result.error, result.message), errorStatus[result.error]);
   return c.json(result.session, 201);
+});
+
+app.post("/api/lobbies/:code/close", async (c) => {
+  const code = LobbyCode.safeParse(c.req.param("code"));
+  if (!code.success) return c.json(errorBody("not_found", "Lobby not found"), 404);
+  const body = CloseLobbyRequest.safeParse(await readJson(c.req.raw));
+  if (!body.success) return c.json(errorBody("bad_request", "Missing session"), 400);
+  const limited = await rateLimit(c.env, c.req.raw, ["closeLobby"]);
+  if (limited) return limited;
+
+  const result = await c.env.LOBBY.getByName(code.data).close(body.data.token);
+  if (!result.ok) return c.json(errorBody(result.error, result.message), errorStatus[result.error]);
+  return c.body(null, 204);
 });
 
 app.post("/api/client-errors", async (c) => {

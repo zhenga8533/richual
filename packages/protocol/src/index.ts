@@ -68,6 +68,10 @@ export const SummariesRequest = z.object({
 });
 export type SummariesRequest = z.infer<typeof SummariesRequest>;
 
+/** Closes a lobby from outside it ("Your games"); the token must be the host's. */
+export const CloseLobbyRequest = z.object({ token: z.string().min(1).max(128) });
+export type CloseLobbyRequest = z.infer<typeof CloseLobbyRequest>;
+
 /** What "Your games" shows for one saved seat. Plain types: the landing page reads it without Zod. */
 export type LobbySummary = {
   status: "open" | "playing" | "finished";

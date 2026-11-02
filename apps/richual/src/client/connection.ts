@@ -25,8 +25,8 @@ type ConnectionState = {
   status: ConnectionStatus;
   playerId: string | null;
   lobby: LobbySnapshot | null;
-  /** Fatal connection problem, shown in place of the lobby. */
-  error: string | null;
+  /** Why the server ended this seat's connection for good; the page shows it in place of the lobby. */
+  closeCode: number | null;
   /** Events up to this sequence number are history replayed on connect, not news. */
   historySeq: number;
   log: LoggedEvent[];
@@ -42,7 +42,7 @@ export const useConnection = create<ConnectionState>(() => ({
   status: "connecting",
   playerId: null,
   lobby: null,
-  error: null,
+  closeCode: null,
   historySeq: 0,
   log: [],
   pendingActionId: null,
@@ -63,14 +63,15 @@ const WELCOME_TIMEOUT_MS = 6_000;
 const MAX_BACKOFF_MS = 10_000;
 const MAX_LOG = 200;
 
-const TERMINAL_CLOSES: Record<number, string> = {
-  [CloseCode.Unauthorized]: "Your session for this lobby is no longer valid.",
-  [CloseCode.ProtocolMismatch]: "A new version of Richual is available. Please reload.",
-  [CloseCode.LobbyClosed]: "This lobby has closed.",
-  [CloseCode.Replaced]: "This lobby is open in another tab.",
-  [CloseCode.Removed]: "The host removed you from this lobby.",
-  [CloseCode.SeatMoved]: "Your seat moved to another device.",
-};
+/** Closes after which reconnecting can't help. */
+const TERMINAL_CLOSES: ReadonlySet<number> = new Set([
+  CloseCode.Unauthorized,
+  CloseCode.ProtocolMismatch,
+  CloseCode.LobbyClosed,
+  CloseCode.Replaced,
+  CloseCode.Removed,
+  CloseCode.SeatMoved,
+]);
 
 /** Closes after which this browser's session for the lobby is gone for good. */
 const SESSION_ENDING: ReadonlySet<number> = new Set([
@@ -120,7 +121,7 @@ function handleMessage(msg: ServerMessage): void {
         // Evaluated after `log` above has numbered the replayed events.
         historySeq: logSeq,
         clockOffset: msg.lobby.serverNow - Date.now(),
-        error: null,
+        closeCode: null,
         // Anything in flight before a reconnect is reflected in this snapshot.
         pendingActionId: null,
       });
@@ -168,7 +169,7 @@ export function connect(session: SessionResponse): () => void {
     status: "connecting",
     playerId: null,
     lobby: null,
-    error: null,
+    closeCode: null,
     historySeq: logSeq,
     log: [],
     pendingActionId: null,
@@ -220,10 +221,9 @@ export function connect(session: SessionResponse): () => void {
     clearTimeout(welcomeTimer);
     if (activeSocket === socket) activeSocket = null;
     if (disposed) return;
-    const terminal = TERMINAL_CLOSES[code];
-    if (terminal) {
+    if (TERMINAL_CLOSES.has(code)) {
       if (SESSION_ENDING.has(code)) clearSession(session.code);
-      useConnection.setState({ status: "closed", error: terminal, pendingActionId: null });
+      useConnection.setState({ status: "closed", closeCode: code, pendingActionId: null });
       return;
     }
     const delay = Math.min(MAX_BACKOFF_MS, 500 * 2 ** attempt) * (0.5 + Math.random() / 2);

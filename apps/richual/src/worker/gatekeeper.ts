@@ -61,6 +61,7 @@ export const LIMITS = {
   /** Joins that carry a passcode: few enough that one client can't lock a listed lobby. */
   passcodeGuess: { limit: 10, windowMs: 10 * MINUTE_MS },
   claimSeat: { limit: 10, windowMs: 10 * MINUTE_MS },
+  closeLobby: { limit: 10, windowMs: 10 * MINUTE_MS },
   clientError: { limit: 30, windowMs: 10 * MINUTE_MS },
   summaries: { limit: 30, windowMs: 10 * MINUTE_MS },
   browse: { limit: 60, windowMs: 10 * MINUTE_MS },

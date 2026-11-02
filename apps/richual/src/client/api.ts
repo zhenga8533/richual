@@ -25,13 +25,15 @@ export class ApiError extends Error {
 /** The body of a successful response, or an ApiError carrying the server's message. */
 async function read<T>(res: Response, guard: (value: unknown) => value is T): Promise<T> {
   const json: unknown = await res.json().catch(() => null);
-  if (!res.ok) {
-    if (isErrorResponse(json)) throw new ApiError(json.error, json.message);
-    throw new ApiError("internal", `Request failed (${res.status})`);
-  }
+  if (!res.ok) throw failure(res, json);
   if (!guard(json)) throw new ApiError("internal", "Unexpected response from server");
   return json;
 }
+
+const failure = (res: Response, json: unknown) =>
+  isErrorResponse(json)
+    ? new ApiError(json.error, json.message)
+    : new ApiError("internal", `Request failed (${res.status})`);
 
 const postJson = (path: string, body: unknown) =>
   fetch(path, {
@@ -50,6 +52,12 @@ export const joinLobby = (code: string, name: string, passcode?: string) =>
 
 export const claimSeat = (code: string, seatCode: string) =>
   post(`/api/lobbies/${encodeURIComponent(code)}/claim`, { seatCode });
+
+/** Closes a lobby for everyone; only the host's token is accepted. */
+export async function closeLobby(code: string, token: string): Promise<void> {
+  const res = await postJson(`/api/lobbies/${encodeURIComponent(code)}/close`, { token });
+  if (!res.ok) throw failure(res, await res.json().catch(() => null));
+}
 
 /** Status of each saved seat, for "Your games". */
 export async function fetchSummaries(sessions: SessionResponse[]): Promise<SummariesResponse> {
