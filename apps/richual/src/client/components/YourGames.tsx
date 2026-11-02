@@ -1,10 +1,10 @@
 import type { LobbySummary, SummaryResult } from "@richual/protocol";
 import { MAX_SUMMARIES } from "@richual/protocol/constants";
-import { X } from "lucide-react";
+import { Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import { fetchSummaries } from "../api";
+import { ApiError, closeLobby, fetchSummaries } from "../api";
 import { lobbyPath, navigate } from "../router";
-import { clearSession, listSessions } from "../session";
+import { clearSession, listSessions, loadSession } from "../session";
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
 
@@ -57,48 +57,116 @@ export function YourGames() {
         Your games
       </h2>
       <ul aria-labelledby="your-games-heading" className="flex flex-col">
-        {rows.map(({ code, summary }) => (
-          <li
-            key={code}
-            className="flex items-center gap-3 border-b border-line px-1 py-2 last:border-0"
-          >
-            <span className="flex min-w-0 flex-1 flex-col">
-              <span className="flex items-center gap-2">
-                <span className="font-mono text-sm font-semibold tracking-[0.15em]">{code}</span>
-                <span className="truncate text-xs text-muted">
-                  {summary ? statusText(summary) : "Status unavailable"}
-                </span>
-              </span>
-              {summary && (
-                <span className="truncate text-xs text-muted">
-                  {summary.isHost ? "Hosting · " : ""}
-                  {summary.players.map((p) => p.name).join(", ")}
-                </span>
-              )}
-            </span>
-            <Button
-              size="sm"
-              variant="primary"
-              aria-label={`Rejoin ${code}`}
-              onClick={() => navigate(lobbyPath(code))}
-            >
-              Rejoin
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="px-2"
-              aria-label={`Forget ${code}`}
-              title="Forget this game on this device (you stay in it)"
-              onClick={() => forget(code)}
-            >
-              <X />
-            </Button>
-          </li>
+        {rows.map((row) => (
+          <GameRow key={row.code} {...row} onGone={() => forget(row.code)} />
         ))}
       </ul>
       {error && <p className="px-1 text-xs text-muted">{error}</p>}
     </Card>
+  );
+}
+
+/** One saved seat. `onGone` drops it from this device once it can't be played any more. */
+function GameRow({ code, summary, onGone }: Row & { onGone: () => void }) {
+  const [confirming, setConfirming] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const [closeError, setCloseError] = useState<string | null>(null);
+
+  const close = async () => {
+    const session = loadSession(code);
+    if (!session) return onGone();
+    setClosing(true);
+    setCloseError(null);
+    try {
+      await closeLobby(code, session.token);
+      onGone();
+    } catch (err) {
+      // Either way the seat is gone, which is what closing was for.
+      if (err instanceof ApiError && (err.code === "not_found" || err.code === "unauthorized")) {
+        onGone();
+        return;
+      }
+      setCloseError(err instanceof Error ? err.message : "Couldn't close the lobby");
+      setClosing(false);
+    }
+  };
+
+  return (
+    <li className="flex flex-col gap-2 border-b border-line px-1 py-2 last:border-0">
+      <div className="flex items-center gap-3">
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="flex items-center gap-2">
+            <span className="font-mono text-sm font-semibold tracking-[0.15em]">{code}</span>
+            <span className="truncate text-xs text-muted">
+              {summary ? statusText(summary) : "Status unavailable"}
+            </span>
+          </span>
+          {summary && (
+            <span className="truncate text-xs text-muted">
+              {summary.isHost ? "Hosting · " : ""}
+              {summary.players.map((p) => p.name).join(", ")}
+            </span>
+          )}
+        </span>
+        <Button
+          size="sm"
+          variant="primary"
+          aria-label={`Rejoin ${code}`}
+          onClick={() => navigate(lobbyPath(code))}
+        >
+          Rejoin
+        </Button>
+        {summary?.isHost && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="px-2"
+            aria-label={`Close ${code} for everyone`}
+            aria-expanded={confirming}
+            title="Close this lobby for everyone"
+            onClick={() => setConfirming(true)}
+          >
+            <Trash2 />
+          </Button>
+        )}
+        <Button
+          size="sm"
+          variant="ghost"
+          className="px-2"
+          aria-label={`Forget ${code}`}
+          title="Forget this game on this device (you stay in it)"
+          onClick={onGone}
+        >
+          <X />
+        </Button>
+      </div>
+      {confirming && (
+        <div className="flex flex-col gap-2 rounded-lg bg-surface-2 p-3">
+          <p className="text-sm">Close {code} for everyone? The game and its code are deleted.</p>
+          <div className="grid grid-cols-2 gap-2">
+            <Button variant="danger" size="sm" disabled={closing} onClick={() => void close()}>
+              {closing ? "Closing…" : "Close for everyone"}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={closing}
+              onClick={() => {
+                setConfirming(false);
+                setCloseError(null);
+              }}
+            >
+              Cancel
+            </Button>
+          </div>
+          {closeError && (
+            <p role="alert" className="text-sm text-danger">
+              {closeError}
+            </p>
+          )}
+        </div>
+      )}
+    </li>
   );
 }
 

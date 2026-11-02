@@ -899,6 +899,33 @@ export class LobbyDO extends DurableObject<Env> {
     };
   }
 
+  /** Closes the lobby for the host holding `token`, without a socket ("Your games"). */
+  async close(
+    token: string,
+  ): Promise<
+    { ok: true } | { ok: false; error: "not_found" | "unauthorized" | "forbidden"; message: string }
+  > {
+    const tokenHash = await sha256Hex(token);
+    // Read after hashing: the lobby can change, or be deleted, while the hash is computed.
+    const lobby = this.lobby();
+    if (!lobby) return { ok: false, error: "not_found", message: "Lobby not found" };
+    const me = this.sql
+      .exec<{ id: string }>(
+        "SELECT id FROM players WHERE token_hash = ? AND kind = 'human'",
+        tokenHash,
+      )
+      .toArray()[0];
+    if (!me) {
+      return { ok: false, error: "unauthorized", message: "You're no longer in this lobby" };
+    }
+    if (lobby.host_id !== me.id) {
+      return { ok: false, error: "forbidden", message: "Only the host can close this lobby" };
+    }
+    console.log("host closed lobby", lobby.code);
+    await this.deleteLobby("closed by the host");
+    return { ok: true };
+  }
+
   private setHost(hostId: string, playerId: string): void {
     this.requireHost(hostId);
     const target = this.players().find((p) => p.id === playerId);

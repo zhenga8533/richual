@@ -72,7 +72,9 @@ test("a seat moves to another device with a one-time code", async ({ browser }) 
   await expect(newDevice.getByText("Mover")).toBeVisible();
   // The code never stays in the address bar.
   expect(new URL(newDevice.url()).hash).toBe("");
-  await expect(oldDevice.getByText("Your seat moved to another device.")).toBeVisible();
+  await expect(
+    oldDevice.getByRole("heading", { name: "Your seat moved to another device" }),
+  ).toBeVisible();
 });
 
 test("the board is navigable with arrow keys", async ({ browser }) => {
@@ -130,6 +132,32 @@ test("Your games lists every lobby this browser is in, and Rejoin opens it", asy
     .click();
   await expect(page).toHaveURL(first);
   await expect(page.getByRole("heading", { name: /^Players \(/ })).toBeVisible();
+});
+
+test("the host can close a lobby from Your games", async ({ browser }) => {
+  const host = await newPlayer(browser);
+  const url = await createLobby(host, "Tidier");
+  const code = url.slice(-6);
+  const guest = await newPlayer(browser);
+  await guest.goto(url);
+  await guest.getByLabel("Your name").fill("Guest");
+  await guest.getByRole("button", { name: "Join" }).click();
+  await expect(guest.getByRole("heading", { name: /^Players \(/ })).toBeVisible();
+
+  // Only the host gets the option.
+  await guest.goto("/");
+  const guestRow = guest.getByRole("list", { name: "Your games" }).getByRole("listitem");
+  await expect(guestRow.getByText(code)).toBeVisible();
+  await expect(guestRow.getByRole("button", { name: `Close ${code} for everyone` })).toHaveCount(0);
+
+  await host.goto("/");
+  const row = host.getByRole("list", { name: "Your games" }).getByRole("listitem");
+  await row.getByRole("button", { name: `Close ${code} for everyone` }).click();
+  await row.getByRole("button", { name: "Close for everyone" }).click();
+  await expect(host.getByRole("list", { name: "Your games" })).toHaveCount(0);
+
+  await host.goto(url);
+  await expect(host.getByRole("heading", { name: "This lobby no longer exists" })).toBeVisible();
 });
 
 test("a public lobby shows up in Browse for another player, who can join it", async ({
@@ -208,11 +236,15 @@ test("the host can close the lobby for everyone", async ({ browser }) => {
   await guest.getByLabel("Your name").fill("Guest");
   await guest.getByRole("button", { name: "Join" }).click();
   await expect(host.getByText("Guest")).toBeVisible();
+  // Connected, so the guest is told who closed it rather than just that it's gone.
+  await expect(guest.getByRole("heading", { name: /^Players \(/ })).toBeVisible();
 
   await host.getByRole("button", { name: "Close lobby" }).click();
   await host.getByRole("button", { name: "Close for everyone" }).click();
-  await expect(guest.getByText("This lobby has closed.")).toBeVisible();
-  await expect(host.getByText("This lobby has closed.")).toBeVisible();
+  await expect(guest.getByRole("heading", { name: "The host closed this lobby" })).toBeVisible();
+  await expect(host.getByRole("heading", { name: "You closed this lobby" })).toBeVisible();
+  // The old lobby is replaced, not left on screen behind a banner.
+  await expect(guest.getByRole("heading", { name: /^Players \(/ })).toHaveCount(0);
 
   await host.goto("/");
   await expect(host.getByText(url.slice(-6))).toHaveCount(0);

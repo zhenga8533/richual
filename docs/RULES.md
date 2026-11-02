@@ -90,8 +90,8 @@ a 20-round limit.
 ## Waiting in queue
 
 - The **host** can pause and resume (clocks stop while paused; trade offers can still be made) and
-  end the game early. The host can also **Close lobby**, which deletes the lobby, its game and its
-  code for everyone.
+  end the game early. The host can also **Close lobby**, from the lobby or from **Your games**,
+  which deletes the lobby, its game and its code for everyone. Everyone still in it is told so.
 - An optional **turn timer** auto-plays idle players with safe moves only: roll, pass, end the turn,
   and sell or seal just enough to pay a debt. It never trades.
 - If the host is away for two minutes, hosting passes to the player who has been connected longest.
