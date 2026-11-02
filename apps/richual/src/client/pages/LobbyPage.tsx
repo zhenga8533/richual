@@ -1,4 +1,4 @@
-import type { LobbyInfo, SessionResponse } from "@richual/protocol";
+import { type LobbyInfo, MAX_PLAYERS, type SessionResponse } from "@richual/protocol";
 import { Check, Link2 } from "lucide-react";
 import { type FormEvent, lazy, Suspense, useEffect, useRef, useState } from "react";
 import { ApiError, claimSeat, fetchLobbyInfo, joinLobby } from "../api";
@@ -93,11 +93,19 @@ function JoinForm({
           title: "This lobby no longer exists",
           detail: "Its host closed it, or it expired after a week without play.",
         }
-      : info && info.status !== "open"
-        ? { title: "This game has already started", detail: "Ask the host for a new invite." }
-        : info?.full
-          ? { title: "This lobby is full", detail: "All six seats are taken." }
-          : null;
+      : info?.status === "playing"
+        ? {
+            title: "This game has already started",
+            detail: "New players can join after this game, if the host goes back to the lobby.",
+          }
+        : info?.status === "finished"
+          ? {
+              title: "This game has ended",
+              detail: "New players can join if the host goes back to the lobby.",
+            }
+          : info?.full
+            ? { title: "This lobby is full", detail: `All ${MAX_PLAYERS} seats are taken.` }
+            : null;
   if (unavailable) {
     return (
       <div className="flex w-full max-w-sm flex-1 flex-col justify-center py-8">

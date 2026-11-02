@@ -2,10 +2,11 @@
 // budget. The lobby and game load lazily and don't count.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
 
 const BUDGET_KB = 100;
-const dist = new URL("../dist/client/", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
+const dist = fileURLToPath(new URL("../dist/client/", import.meta.url));
 
 const html = readFileSync(join(dist, "index.html"), "utf8");
 const scripts = [

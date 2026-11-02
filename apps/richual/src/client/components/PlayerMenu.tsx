@@ -12,7 +12,7 @@ import {
   MenuRadioItem,
   MenuRoot,
   MenuTrigger,
-} from "../ui/radix";
+} from "../ui/menu";
 
 /** The host's actions for another player's seat; renders nothing for everyone else. */
 export function PlayerMenu({ lobby, player }: { lobby: LobbySnapshot; player: LobbyPlayer }) {

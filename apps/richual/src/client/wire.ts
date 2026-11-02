@@ -31,7 +31,8 @@ const isSummaryResult = (value: unknown): value is SummaryResult =>
     ? isRecord(value.summary) &&
       typeof value.summary.status === "string" &&
       Array.isArray(value.summary.players) &&
-      typeof value.summary.you === "string"
+      typeof value.summary.you === "string" &&
+      typeof value.summary.lastActiveAt === "number"
     : typeof value.error === "string");
 
 export const isSummariesResponse = (value: unknown): value is SummariesResponse =>
@@ -42,7 +43,10 @@ const isPublicLobby = (value: unknown): value is PublicLobby =>
   typeof value.code === "string" &&
   typeof value.hostName === "string" &&
   typeof value.players === "number" &&
-  typeof value.maxPlayers === "number";
+  typeof value.maxPlayers === "number" &&
+  typeof value.mode === "string" &&
+  typeof value.speedDie === "boolean" &&
+  typeof value.locked === "boolean";
 
 export const isPublicLobbiesResponse = (value: unknown): value is PublicLobbiesResponse =>
   isRecord(value) && Array.isArray(value.lobbies) && value.lobbies.every(isPublicLobby);

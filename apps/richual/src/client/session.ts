@@ -20,23 +20,27 @@ export function loadSession(code: string): SessionResponse | null {
 
 export function saveSession(session: SessionResponse): void {
   try {
-    localStorage.setItem(key(session.code), JSON.stringify(session));
+    const saved = { ...session, savedAt: Date.now() };
+    localStorage.setItem(key(session.code), JSON.stringify(saved));
   } catch (error) {
     console.warn("could not persist session; reconnect after reload will not work", error);
   }
 }
 
-/** Every seat this browser holds, one per lobby. */
+/** Every seat this browser holds, one per lobby, most recently saved first. */
 export function listSessions(): SessionResponse[] {
   try {
-    const sessions: SessionResponse[] = [];
+    const sessions: { session: SessionResponse; savedAt: number }[] = [];
     for (let i = 0; i < localStorage.length; i++) {
       const name = localStorage.key(i);
       if (!name?.startsWith(PREFIX)) continue;
       const session = loadSession(name.slice(PREFIX.length));
-      if (session) sessions.push(session);
+      if (!session) continue;
+      // Sessions saved before savedAt existed sort last.
+      const savedAt = (session as { savedAt?: unknown }).savedAt;
+      sessions.push({ session, savedAt: typeof savedAt === "number" ? savedAt : 0 });
     }
-    return sessions;
+    return sessions.sort((a, b) => b.savedAt - a.savedAt).map((s) => s.session);
   } catch {
     return [];
   }

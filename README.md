@@ -12,10 +12,11 @@ matchmaking queues: games persist across sessions and can be paused, resumed and
 
 ## Features
 
-- Private lobbies for 2–6 players by invite link; guest names, no accounts
+- Lobbies for 2–6 players by invite link; guest names, no accounts
 - Classic and Quick modes, optional round or play-time limits scored by net worth
 - Auctions, building, sealing, trading, raising funds and bankruptcy, all enforced by the server
-- Host pause/resume and end-early, optional turn timer with safe auto-play, host handover
+- Host pause/resume, end-early and close-lobby, optional turn timer with safe auto-play, host
+  handover
 - Easy, Normal and Hard bots to fill seats, or to take over a player who has to leave; rematch in
   one click
 - Optional Speed Die (on in Quick mode)
@@ -23,7 +24,7 @@ matchmaking queues: games persist across sessions and can be paused, resumed and
   one-time code or QR; games are kept for 7 days of inactivity
 - **Your games** on the landing page lists every lobby this browser has a seat in
 - Optional public lobbies, listed on the Browse tab while they wait for players, with an optional
-  passcode
+  passcode; an invite link says straight away if its lobby is gone, started or full
 - Per-client rate limits and a daily cap on new lobbies keep the free tier from being exhausted
 - Chat, turn alerts, and a layout that works on a second monitor or a phone
 
@@ -100,14 +101,16 @@ Everything runs within the Cloudflare Workers free plan at friend-group scale. S
   version they acted on; stale actions are refused with a fresh snapshot, and resent actions are
   acknowledged without being applied twice.
 - **One alarm** drives every deadline: decision timers, the time limit, host handover, bot moves
-  (one per wake-up, 900 ms apart) and idle cleanup.
+  (one per wake-up, 900 ms apart), refreshing a public listing and idle cleanup.
 - **A gatekeeper Durable Object** counts requests per hashed client address (raw IPs are never
   stored) and the global daily lobby cap.
 - **A directory Durable Object** holds the public lobbies. A lobby lists itself while it is
-  public, waiting, not full and its host is connected, and takes itself down otherwise; listings
-  older than two hours are pruned in case a lobby vanished without saying so.
-- **Passcodes** are stored as a salted hash and never sent to clients. Each lobby counts wrong
-  guesses and refuses every join for 10 minutes after 10 of them.
+  public, waiting, not full and its host is connected, and takes itself down otherwise. It
+  refreshes its listing every hour, and listings older than two hours are pruned in case a lobby
+  vanished without saying so.
+- **Passcodes** are stored as a salted hash and never sent to clients. Each client gets 10 guesses
+  per 10 minutes, and after 50 wrong guesses within 10 minutes a lobby refuses joins until those
+  10 minutes are up.
 - **The landing page stays small** (about 90 KB gzip): it never loads Zod or the engine, and
   `pnpm build` fails if its scripts pass 100 KB.
 - **Client errors** are reported to `POST /api/client-errors` and appear in Workers logs, as does a

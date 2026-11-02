@@ -1,9 +1,10 @@
-import { runInDurableObject } from "cloudflare:test";
+import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
 import type { LobbySnapshot, PublicLobbiesResponse } from "@richual/protocol";
 import { describe, expect, it } from "vitest";
 import { LISTING_TTL_MS } from "../src/worker/directory";
 import { LIMITS } from "../src/worker/gatekeeper";
+import { LISTING_REFRESH_MS } from "../src/worker/lobby";
 import { BASE, connect, createLobby, joinLobby, type TestSocket } from "./helpers";
 
 const browse = (ip?: string) =>
@@ -113,6 +114,42 @@ describe("public lobbies", () => {
       );
     });
     expect(await listedCodes()).not.toContain(session.code);
+  });
+
+  it("keeps a quiet lobby listed by refreshing it before the TTL", async () => {
+    const { session } = await publicLobby();
+    await eventually((codes) => codes.includes(session.code));
+    const directory = env.DIRECTORY.getByName("directory");
+    const stub = env.LOBBY.getByName(session.code);
+    // Nothing has happened in the lobby for most of the TTL.
+    const old = Date.now() - LISTING_REFRESH_MS - 1;
+    await runInDurableObject(directory, (_, state) => {
+      state.storage.sql.exec(
+        "UPDATE listings SET updated_at = ? WHERE code = ?",
+        old,
+        session.code,
+      );
+    });
+    await runInDurableObject(stub, (instance) => {
+      (instance as unknown as { listedAt: number }).listedAt = old;
+    });
+    expect(await runDurableObjectAlarm(stub)).toBe(true);
+    const updatedAt = () =>
+      runInDurableObject(
+        directory,
+        (_, state) =>
+          state.storage.sql
+            .exec<{ updated_at: number }>(
+              "SELECT updated_at FROM listings WHERE code = ?",
+              session.code,
+            )
+            .toArray()[0]?.updated_at ?? 0,
+      );
+    // The refresh is sent after the alarm returns.
+    for (let i = 0; i < 50 && (await updatedAt()) <= old; i++) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    expect(await updatedAt()).toBeGreaterThan(old);
   });
 
   it("is rate-limited per client", async () => {

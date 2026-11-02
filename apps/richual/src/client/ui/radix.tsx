@@ -2,10 +2,8 @@ import { Dialog, Popover, Switch as SwitchPrimitive } from "radix-ui";
 import type { ComponentProps, ReactNode } from "react";
 import { cn } from "./cn";
 
-// Tabs and the menu live in their own modules so the landing page can load them
-// without the dialog and popover code.
-export * from "./menu";
-export * from "./tabs";
+// Tabs and the menu live in ui/tabs and ui/menu, so the landing page can load them
+// without the dialog and popover code here.
 
 // ---------- Popover ----------
 

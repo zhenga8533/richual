@@ -6,7 +6,7 @@ import {
   TURN_TIMER_OPTIONS,
 } from "@richual/protocol";
 import { Bot, ChevronDown, KeyRound } from "lucide-react";
-import { type FormEvent, type ReactNode, useState } from "react";
+import { type FormEvent, type ReactNode, useEffect, useState } from "react";
 import { BOT_LEVEL_OPTIONS, botLevelLabel } from "../botLevels";
 import { send, useConnection } from "../connection";
 import { SOULS } from "../theme";
@@ -14,7 +14,8 @@ import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Input, Select } from "../ui/field";
-import { MenuContent, MenuItem, MenuRoot, MenuTrigger, Switch } from "../ui/radix";
+import { MenuContent, MenuItem, MenuRoot, MenuTrigger } from "../ui/menu";
+import { Switch } from "../ui/radix";
 import { ChatPanel } from "./ChatPanel";
 import { CloseLobbyButton } from "./CloseLobbyButton";
 import { heroLabel } from "./heroLabel";
@@ -303,6 +304,9 @@ export function Setup({ lobby }: { lobby: LobbySnapshot }) {
 }
 
 type Visibility = LobbySettings["visibility"];
+// The passcode option sits between the other two: arrow keys on a closed select
+// apply each option they pass, and going from Private to a passcode must never
+// list the lobby openly on the way.
 const VISIBILITY_OPTIONS: { value: Visibility; label: string; hint: string }[] = [
   {
     value: "private",
@@ -310,20 +314,23 @@ const VISIBILITY_OPTIONS: { value: Visibility; label: string; hint: string }[] =
     hint: "Only people with the invite link or code can join.",
   },
   {
-    value: "public",
-    label: "Public",
-    hint: "Listed on the Browse tab while it waits for players. Anyone can join.",
-  },
-  {
     value: "passcode",
     label: "Public with passcode",
-    hint: "Listed on the Browse tab, but joining needs the passcode.",
+    hint: "Listed on the Browse tab while it waits for players and you're here, but joining needs the passcode.",
+  },
+  {
+    value: "public",
+    label: "Public",
+    hint: "Listed on the Browse tab while it waits for players and you're here. Anyone can join.",
   },
 ];
 
 /** Switching to a passcode only takes effect once the host has typed one. */
 function WhoCanJoin({ settings, isHost }: { settings: LobbySettings; isHost: boolean }) {
   const [draft, setDraft] = useState<string | null>(null);
+  useEffect(() => {
+    if (!isHost) setDraft(null);
+  }, [isHost]);
   const editing = draft !== null;
   const choice = editing ? "passcode" : settings.visibility;
   const passcode = draft?.trim() ?? "";

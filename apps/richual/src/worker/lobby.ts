@@ -37,7 +37,7 @@ import {
   type SessionResponse,
 } from "@richual/protocol";
 import { generateLobbyCode, generateToken, hashPasscode, passcodeSalt, sha256Hex } from "./crypto";
-import type { Listing } from "./directory";
+import { LISTING_TTL_MS, type Listing } from "./directory";
 import { createSchema, isInitialized, migrate } from "./schema";
 
 /** Lobbies with no activity for this long are deleted. */
@@ -47,9 +47,15 @@ export const HELLO_TIMEOUT_MS = 5_000;
 export const HOST_GRACE_MS = 2 * 60 * 1000;
 /** Pause before each bot move, so people can follow what the bot did. */
 export const BOT_DELAY_MS = 900;
-/** Wrong passcodes a lobby accepts per window before every join has to wait it out. */
-export const PASSCODE_MAX_FAILURES = 10;
+/**
+ * Wrong passcodes a lobby accepts per window before every join has to wait it out.
+ * Each client also gets only a few guesses (LIMITS.passcodeGuess), so no single
+ * client can lock a listed lobby on its own.
+ */
+export const PASSCODE_MAX_FAILURES = 50;
 export const PASSCODE_WINDOW_MS = 10 * 60 * 1000;
+/** A listed lobby re-sends its listing this often, well inside the directory's TTL. */
+export const LISTING_REFRESH_MS = LISTING_TTL_MS / 2;
 const CHAT_HISTORY = 30;
 /** Event batches (one per state change) kept for reconnecting clients' logs. */
 const EVENT_HISTORY = 40;
@@ -95,7 +101,7 @@ type PlayerRow = {
 
 export type JoinResult =
   | { ok: true; session: SessionResponse }
-  | { ok: false; error: ErrorCode; message: string };
+  | { ok: false; error: ErrorCode; message: string; retryAfterMs?: number };
 
 class RequestError extends Error {
   constructor(
@@ -157,6 +163,14 @@ export class LobbyDO extends DurableObject<Env> {
     if (!lobby) return { ok: false, error: "not_found", message: "Lobby not found" };
     if (lobby.status !== "open") {
       return { ok: false, error: "game_in_progress", message: "This game has already started" };
+    }
+    // The guess was hashed with a salt the host has since replaced; don't count it.
+    if (passcode && lobby.passcode_hash && lobby.passcode_hash !== stored) {
+      return {
+        ok: false,
+        error: "wrong_passcode",
+        message: "The passcode just changed. Try again.",
+      };
     }
     const refused = this.checkPasscode(lobby, passcode, attempt);
     if (refused) return refused;
@@ -315,17 +329,20 @@ export class LobbyDO extends DurableObject<Env> {
   private async deleteLobby(reason: string): Promise<void> {
     const lobby = this.requireLobby();
     const { code } = lobby;
-    if (parseSettings(lobby.settings_json).visibility !== "private") {
+    const listed = parseSettings(lobby.settings_json).visibility !== "private";
+    // Storage goes first: nothing else runs during storage awaits, and once it is
+    // gone no join, socket or listing sync can bring the lobby back.
+    await this.ctx.storage.deleteAlarm();
+    await this.ctx.storage.deleteAll();
+    this.listedAs = undefined;
+    this.listedAt = null;
+    for (const ws of this.ctx.getWebSockets()) {
+      safeClose(ws, CloseCode.LobbyClosed, reason);
+    }
+    if (listed) {
       await this.directory()
         .remove(code)
         .catch((error: unknown) => console.error("directory remove failed", code, error));
-    }
-    this.listedAs = undefined;
-    await this.ctx.storage.deleteAlarm();
-    await this.ctx.storage.deleteAll();
-    // Only now: a socket can still be accepted while the awaits above run.
-    for (const ws of this.ctx.getWebSockets()) {
-      safeClose(ws, CloseCode.LobbyClosed, reason);
     }
   }
 
@@ -366,6 +383,7 @@ export class LobbyDO extends DurableObject<Env> {
 
     lobby = this.requireLobby();
     if (lobby.host_check_at !== null && now >= lobby.host_check_at) this.handOverHost(now);
+    this.syncListing();
     await this.scheduleAlarm(true);
   }
 
@@ -450,8 +468,9 @@ export class LobbyDO extends DurableObject<Env> {
     settings: LobbySettings,
     passcode: string | undefined,
   ): Promise<void> {
-    const newHash = passcode === undefined ? undefined : await hashPasscode(passcode);
     this.requireHost(playerId);
+    const newHash = passcode === undefined ? undefined : await hashPasscode(passcode);
+    // Read after hashing: the lobby can change while the hash is computed.
     const lobby = this.requireStatus("open");
     const hash = settings.visibility === "passcode" ? (newHash ?? lobby.passcode_hash) : null;
     if (settings.visibility === "passcode" && !hash) {
@@ -490,13 +509,13 @@ export class LobbyDO extends DurableObject<Env> {
     const windowOpen =
       lobby.passcode_failed_at !== null && now - lobby.passcode_failed_at < PASSCODE_WINDOW_MS;
     if (windowOpen && lobby.passcode_failures >= PASSCODE_MAX_FAILURES) {
-      const minutes = Math.ceil(
-        ((lobby.passcode_failed_at ?? now) + PASSCODE_WINDOW_MS - now) / 60_000,
-      );
+      const retryAfterMs = (lobby.passcode_failed_at ?? now) + PASSCODE_WINDOW_MS - now;
+      const minutes = Math.ceil(retryAfterMs / 60_000);
       return {
         ok: false,
         error: "rate_limited",
         message: `Too many wrong passcodes. Try again in ${minutes} minute${minutes === 1 ? "" : "s"}.`,
+        retryAfterMs,
       };
     }
     if (!passcode) {
@@ -855,9 +874,10 @@ export class LobbyDO extends DurableObject<Env> {
   ): Promise<
     { ok: true; summary: LobbySummary } | { ok: false; error: "not_found" | "unauthorized" }
   > {
+    const tokenHash = await sha256Hex(token);
+    // Read after hashing: the lobby can change, or be deleted, while the hash is computed.
     const lobby = this.lobby();
     if (!lobby) return { ok: false, error: "not_found" };
-    const tokenHash = await sha256Hex(token);
     const me = this.sql
       .exec<{ id: string; name: string }>(
         "SELECT id, name FROM players WHERE token_hash = ? AND kind = 'human'",
@@ -981,6 +1001,7 @@ export class LobbyDO extends DurableObject<Env> {
       this.timeLimitAt(lobby),
       lobby.host_check_at,
       lobby.status === "playing" && !lobby.paused ? lobby.bot_due_at : null,
+      this.listedAs && this.listedAt !== null ? this.listedAt + LISTING_REFRESH_MS : null,
     ].filter((t): t is number => t !== null);
     const next = Math.min(...candidates);
     // Only ever bring the alarm forward. Pushing it back on every action (the idle
@@ -1188,10 +1209,13 @@ export class LobbyDO extends DurableObject<Env> {
    * listed", or undefined when unknown (after a wake-up).
    */
   private listedAs: string | null | undefined = undefined;
+  /** When the listing was last sent, so a quiet lobby can refresh it before the directory's TTL. */
+  private listedAt: number | null = null;
 
   /**
-   * Lists the lobby while it is public, waiting, not full and its host is
-   * connected; otherwise takes it down. Only calls the directory on a change.
+   * Lists the lobby while it is public (with or without a passcode), waiting, not
+   * full and its host is connected; otherwise takes it down. Calls the directory
+   * only on a change, or to refresh a listing older than LISTING_REFRESH_MS.
    */
   private syncListing(closing?: WebSocket): void {
     const lobby = this.lobby();
@@ -1217,11 +1241,21 @@ export class LobbyDO extends DurableObject<Env> {
           }
         : null;
     const key = listing ? JSON.stringify(listing) : null;
-    if (key === this.listedAs) return;
+    const now = Date.now();
+    const stale = this.listedAt !== null && now - this.listedAt >= LISTING_REFRESH_MS;
+    if (key === this.listedAs && !(listing && stale)) return;
     this.listedAs = key;
+    this.listedAt = listing ? now : null;
     const sync = listing ? this.directory().upsert(listing) : this.directory().remove(lobby.code);
     this.ctx.waitUntil(
-      sync.catch((error: unknown) => console.error("directory sync failed", lobby.code, error)),
+      sync.catch((error: unknown) => {
+        console.error("directory sync failed", lobby.code, error);
+        // Unknown again, so the next sync retries instead of trusting the failed call.
+        if (this.listedAs === key) {
+          this.listedAs = "unknown";
+          this.listedAt = null;
+        }
+      }),
     );
   }
 }

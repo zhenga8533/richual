@@ -1,3 +1,4 @@
+import { Check } from "lucide-react";
 import { DropdownMenu } from "radix-ui";
 import type { ComponentProps } from "react";
 import { cn } from "./cn";
@@ -64,6 +65,10 @@ export function MenuRadioItem({
       {...props}
     >
       {children}
+      {/* Colour alone isn't enough to show which option is chosen. */}
+      <DropdownMenu.ItemIndicator className="ml-auto pl-2">
+        <Check className="size-4" aria-hidden />
+      </DropdownMenu.ItemIndicator>
     </DropdownMenu.RadioItem>
   );
 }

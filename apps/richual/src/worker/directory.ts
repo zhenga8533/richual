@@ -3,7 +3,8 @@ import type { PublicLobby } from "@richual/protocol";
 
 /**
  * Listings older than this are hidden and pruned. Lobbies refresh their listing
- * on every change, so this only catches ones that vanished without removing it.
+ * on every change and at least every half TTL while quiet, so this only catches
+ * ones that vanished without removing it.
  */
 export const LISTING_TTL_MS = 2 * 60 * 60 * 1000;
 
