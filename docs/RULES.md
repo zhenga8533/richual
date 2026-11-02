@@ -90,7 +90,8 @@ a 20-round limit.
 ## Waiting in queue
 
 - The **host** can pause and resume (clocks stop while paused; trade offers can still be made) and
-  end the game early.
+  end the game early. The host can also **Close lobby**, which deletes the lobby, its game and its
+  code for everyone.
 - An optional **turn timer** auto-plays idle players with safe moves only: roll, pass, end the turn,
   and sell or seal just enough to pay a debt. It never trades.
 - If the host is away for two minutes, hosting passes to the player who has been connected longest.
@@ -115,4 +116,6 @@ a 20-round limit.
     and the host is online, and disappears once the game starts.
   - **Public with passcode**: listed the same way, with a lock, but joining needs the passcode the
     host chose. Players already in the lobby never need it, even when they rejoin.
+- Opening an invite link tells you straight away if the lobby no longer exists, has started or is
+  full, and asks for the passcode if it needs one.
 - After a game, **Rematch** starts a new one with the same players and rules.
