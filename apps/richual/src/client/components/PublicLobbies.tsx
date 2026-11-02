@@ -63,7 +63,10 @@ export function PublicLobbies() {
                 <span className="flex items-center gap-1.5 text-sm font-medium">
                   <span className="truncate">{l.hostName}'s lobby</span>
                   {l.locked && (
-                    <Lock className="size-3.5 shrink-0 text-muted" aria-label="Needs a passcode" />
+                    <span title="Needs a passcode" className="shrink-0">
+                      <Lock className="size-3.5 text-muted" aria-hidden />
+                      <span className="sr-only">Needs a passcode</span>
+                    </span>
                   )}
                 </span>
                 <span className="text-xs text-muted">
@@ -71,7 +74,12 @@ export function PublicLobbies() {
                   {l.speedDie ? " · Speed Die" : ""}
                 </span>
               </span>
-              <Button size="sm" variant="primary" onClick={() => navigate(lobbyPath(l.code))}>
+              <Button
+                size="sm"
+                variant="primary"
+                aria-label={`Join ${l.hostName}'s lobby`}
+                onClick={() => navigate(lobbyPath(l.code))}
+              >
                 Join
               </Button>
             </li>

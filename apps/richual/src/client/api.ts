@@ -22,20 +22,26 @@ export class ApiError extends Error {
   }
 }
 
-async function post(path: string, body: unknown): Promise<SessionResponse> {
-  const res = await fetch(path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+/** The body of a successful response, or an ApiError carrying the server's message. */
+async function read<T>(res: Response, guard: (value: unknown) => value is T): Promise<T> {
   const json: unknown = await res.json().catch(() => null);
   if (!res.ok) {
     if (isErrorResponse(json)) throw new ApiError(json.error, json.message);
     throw new ApiError("internal", `Request failed (${res.status})`);
   }
-  if (!isSessionResponse(json)) throw new ApiError("internal", "Unexpected response from server");
+  if (!guard(json)) throw new ApiError("internal", "Unexpected response from server");
   return json;
 }
+
+const postJson = (path: string, body: unknown) =>
+  fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+const post = async (path: string, body: unknown): Promise<SessionResponse> =>
+  read(await postJson(path, body), isSessionResponse);
 
 export const createLobby = (name: string) => post("/api/lobbies", { name });
 
@@ -47,43 +53,18 @@ export const claimSeat = (code: string, seatCode: string) =>
 
 /** Status of each saved seat, for "Your games". */
 export async function fetchSummaries(sessions: SessionResponse[]): Promise<SummariesResponse> {
-  const res = await fetch("/api/lobbies/summaries", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ sessions: sessions.map(({ code, token }) => ({ code, token })) }),
-  });
-  const json: unknown = await res.json().catch(() => null);
-  if (!res.ok) {
-    if (isErrorResponse(json)) throw new ApiError(json.error, json.message);
-    throw new ApiError("internal", `Request failed (${res.status})`);
-  }
-  if (!isSummariesResponse(json)) throw new ApiError("internal", "Unexpected response from server");
-  return json;
+  const body = { sessions: sessions.map(({ code, token }) => ({ code, token })) };
+  return read(await postJson("/api/lobbies/summaries", body), isSummariesResponse);
 }
 
 /** Public lobbies waiting for players, newest first. */
 export async function fetchPublicLobbies(): Promise<PublicLobbiesResponse> {
-  const res = await fetch("/api/lobbies/public");
-  const json: unknown = await res.json().catch(() => null);
-  if (!res.ok) {
-    if (isErrorResponse(json)) throw new ApiError(json.error, json.message);
-    throw new ApiError("internal", `Request failed (${res.status})`);
-  }
-  if (!isPublicLobbiesResponse(json)) {
-    throw new ApiError("internal", "Unexpected response from server");
-  }
-  return json;
+  return read(await fetch("/api/lobbies/public"), isPublicLobbiesResponse);
 }
 
 /** Whether a lobby exists and can be joined; null when the code doesn't (or no longer) exist. */
 export async function fetchLobbyInfo(code: string): Promise<LobbyInfo | null> {
   const res = await fetch(`/api/lobbies/${encodeURIComponent(code)}`);
-  const json: unknown = await res.json().catch(() => null);
   if (res.status === 404) return null;
-  if (!res.ok) {
-    if (isErrorResponse(json)) throw new ApiError(json.error, json.message);
-    throw new ApiError("internal", `Request failed (${res.status})`);
-  }
-  if (!isLobbyInfo(json)) throw new ApiError("internal", "Unexpected response from server");
-  return json;
+  return read(res, isLobbyInfo);
 }

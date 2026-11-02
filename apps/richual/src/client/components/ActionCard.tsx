@@ -434,7 +434,7 @@ function GameOver({
               <span className="text-xs text-muted tabular-nums">
                 {st.bankrupt
                   ? "Bankrupt"
-                  : `${st.cash} souls · ${st.propertyValue} holdings · ${st.buildingValue} buildings`}
+                  : `${st.cash} ${SOULS} cash · ${st.propertyValue} holdings · ${st.buildingValue} buildings`}
               </span>
             </span>
             <span className="shrink-0 text-right whitespace-nowrap">

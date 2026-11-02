@@ -53,8 +53,10 @@ export function YourGames() {
 
   return (
     <Card className="flex flex-col gap-1 p-3">
-      <h2 className="px-1 pb-1 text-sm font-semibold">Your games</h2>
-      <ul aria-label="Your games" className="flex flex-col">
+      <h2 id="your-games-heading" className="px-1 pb-1 text-sm font-semibold">
+        Your games
+      </h2>
+      <ul aria-labelledby="your-games-heading" className="flex flex-col">
         {rows.map(({ code, summary }) => (
           <li
             key={code}
@@ -74,7 +76,12 @@ export function YourGames() {
                 </span>
               )}
             </span>
-            <Button size="sm" variant="primary" onClick={() => navigate(lobbyPath(code))}>
+            <Button
+              size="sm"
+              variant="primary"
+              aria-label={`Rejoin ${code}`}
+              onClick={() => navigate(lobbyPath(code))}
+            >
               Rejoin
             </Button>
             <Button

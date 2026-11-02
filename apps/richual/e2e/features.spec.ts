@@ -179,7 +179,7 @@ test("a passcode lobby is listed with a lock and asks joiners for the passcode",
     await stranger.getByRole("button", { name: "Refresh public lobbies" }).click();
     await expect(listing).toBeVisible({ timeout: 1_000 });
   }).toPass({ timeout: 15_000 });
-  await expect(listing.getByLabel("Needs a passcode")).toBeVisible();
+  await expect(listing.getByText("Needs a passcode")).toBeAttached();
   await listing.getByRole("button", { name: "Join" }).click();
 
   await stranger.getByLabel("Your name").fill("Stranger");

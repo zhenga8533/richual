@@ -13,16 +13,8 @@ import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
 import { cn } from "../ui/cn";
-import {
-  PopoverAnchor,
-  PopoverContent,
-  PopoverRoot,
-  Sheet,
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "../ui/radix";
+import { PopoverAnchor, PopoverContent, PopoverRoot, Sheet } from "../ui/radix";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { ActionCard } from "./ActionCard";
 import { Board } from "./Board";
 import { Chat } from "./ChatPanel";
