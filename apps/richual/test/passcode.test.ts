@@ -1,6 +1,7 @@
 import { exports } from "cloudflare:workers";
 import type { LobbySnapshot, PublicLobbiesResponse } from "@richual/protocol";
 import { describe, expect, it } from "vitest";
+import { LIMITS } from "../src/worker/gatekeeper";
 import { PASSCODE_MAX_FAILURES } from "../src/worker/lobby";
 import { BASE, connect, createLobby, post, type TestSocket } from "./helpers";
 
@@ -109,7 +110,24 @@ describe("passcode lobbies", () => {
     }
     const locked = await join(session.code, "hunter22");
     expect(locked.status).toBe(429);
+    expect(Number(locked.headers.get("Retry-After"))).toBeGreaterThan(0);
     expect(await locked.json()).toMatchObject({ error: "rate_limited" });
+  });
+
+  it("limits each client's guesses, so one client can't lock the lobby for others", async () => {
+    const { session } = await lockedLobby();
+    const guess = (passcode: string, ip: string) =>
+      exports.default.fetch(`${BASE}/api/lobbies/${session.code}/join`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "CF-Connecting-IP": ip },
+        body: JSON.stringify({ name: "Guest", passcode }),
+      });
+    const attacker = "203.0.113.160";
+    for (let i = 0; i < LIMITS.passcodeGuess.limit; i++) {
+      expect((await guess(`guess-${i}`, attacker)).status).toBe(403);
+    }
+    expect((await guess("hunter22", attacker)).status).toBe(429);
+    expect((await guess("hunter22", "203.0.113.161")).status).toBe(201);
   });
 
   it("shows as locked on the Browse list", async () => {

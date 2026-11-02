@@ -146,11 +146,20 @@ app.post("/api/lobbies/:code/join", async (c) => {
   const body = JoinLobbyRequest.safeParse(await readJson(c.req.raw));
   if (!body.success)
     return c.json(errorBody("bad_request", body.error.issues[0]?.message ?? ""), 400);
-  const limited = await rateLimit(c.env, c.req.raw, ["joinLobby"]);
+  const limited = await rateLimit(
+    c.env,
+    c.req.raw,
+    body.data.passcode ? ["joinLobby", "passcodeGuess"] : ["joinLobby"],
+  );
   if (limited) return limited;
 
   const result = await c.env.LOBBY.getByName(code.data).join(body.data.name, body.data.passcode);
-  if (!result.ok) return c.json(errorBody(result.error, result.message), errorStatus[result.error]);
+  if (!result.ok) {
+    const headers: Record<string, string> = result.retryAfterMs
+      ? { "Retry-After": String(Math.ceil(result.retryAfterMs / 1000)) }
+      : {};
+    return c.json(errorBody(result.error, result.message), errorStatus[result.error], headers);
+  }
   return c.json(result.session, 201);
 });
 

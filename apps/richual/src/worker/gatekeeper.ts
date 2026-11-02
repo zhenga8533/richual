@@ -58,6 +58,8 @@ const DAY_MS = 24 * 60 * MINUTE_MS;
 export const LIMITS = {
   createLobby: { limit: 5, windowMs: 10 * MINUTE_MS },
   joinLobby: { limit: 20, windowMs: 10 * MINUTE_MS },
+  /** Joins that carry a passcode: few enough that one client can't lock a listed lobby. */
+  passcodeGuess: { limit: 10, windowMs: 10 * MINUTE_MS },
   claimSeat: { limit: 10, windowMs: 10 * MINUTE_MS },
   clientError: { limit: 30, windowMs: 10 * MINUTE_MS },
   summaries: { limit: 30, windowMs: 10 * MINUTE_MS },
