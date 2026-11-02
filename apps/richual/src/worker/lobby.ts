@@ -309,12 +309,13 @@ export class LobbyDO extends DurableObject<Env> {
         .remove(code)
         .catch((error: unknown) => console.error("directory remove failed", code, error));
     }
-    for (const ws of this.ctx.getWebSockets()) {
-      safeClose(ws, CloseCode.LobbyClosed, reason);
-    }
     this.listedAs = undefined;
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
+    // Only now: a socket can still be accepted while the awaits above run.
+    for (const ws of this.ctx.getWebSockets()) {
+      safeClose(ws, CloseCode.LobbyClosed, reason);
+    }
   }
 
   override async webSocketClose(ws: WebSocket, code: number, reason: string): Promise<void> {
@@ -370,6 +371,11 @@ export class LobbyDO extends DurableObject<Env> {
       return;
     }
     const tokenHash = await sha256Hex(token);
+    // The lobby may have been closed while the hash was computed.
+    if (!this.lobby()) {
+      safeClose(ws, CloseCode.LobbyClosed, "lobby closed");
+      return;
+    }
     const player = this.sql
       .exec<{ id: string }>("SELECT id FROM players WHERE token_hash = ?", tokenHash)
       .toArray()[0];

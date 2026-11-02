@@ -54,6 +54,12 @@ export const useConnection = create<ConnectionState>(() => ({
 export const serverNow = () => Date.now() + useConnection.getState().clockOffset;
 
 const KEEPALIVE_MS = 30_000;
+/**
+ * A socket that opens but never gets a welcome is given up on and reopened. A close
+ * frame can be lost when a lobby closes just as the socket opens; reopening then
+ * gets the LobbyClosed close for certain. Longer than the server's hello timeout.
+ */
+const WELCOME_TIMEOUT_MS = 6_000;
 const MAX_BACKOFF_MS = 10_000;
 const MAX_LOG = 200;
 
@@ -156,6 +162,7 @@ export function connect(session: SessionResponse): () => void {
   let disposed = false;
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
   let keepalive: ReturnType<typeof setInterval> | undefined;
+  let welcomeTimer: ReturnType<typeof setTimeout> | undefined;
 
   useConnection.setState({
     status: "connecting",
@@ -179,6 +186,11 @@ export function connect(session: SessionResponse): () => void {
         JSON.stringify({ type: "hello", protocol: PROTOCOL_VERSION, token: session.token }),
       );
       keepalive = setInterval(() => socket.send(PING), KEEPALIVE_MS);
+      welcomeTimer = setTimeout(() => {
+        socket.onclose = null;
+        socket.close();
+        ended(socket, 1006);
+      }, WELCOME_TIMEOUT_MS);
     };
 
     socket.onmessage = (event) => {
@@ -193,25 +205,31 @@ export function connect(session: SessionResponse): () => void {
         console.warn("ignoring unrecognized server message", event.data);
         return;
       }
-      if (parsed.data.type === "welcome") attempt = 0;
+      if (parsed.data.type === "welcome") {
+        attempt = 0;
+        clearTimeout(welcomeTimer);
+      }
       handleMessage(parsed.data);
     };
 
-    socket.onclose = (event) => {
-      clearInterval(keepalive);
-      if (activeSocket === socket) activeSocket = null;
-      if (disposed) return;
-      const terminal = TERMINAL_CLOSES[event.code];
-      if (terminal) {
-        if (SESSION_ENDING.has(event.code)) clearSession(session.code);
-        useConnection.setState({ status: "closed", error: terminal, pendingActionId: null });
-        return;
-      }
-      const delay = Math.min(MAX_BACKOFF_MS, 500 * 2 ** attempt) * (0.5 + Math.random() / 2);
-      attempt++;
-      useConnection.setState({ status: "reconnecting", pendingActionId: null });
-      retryTimer = setTimeout(open, delay);
-    };
+    socket.onclose = (event) => ended(socket, event.code);
+  };
+
+  const ended = (socket: WebSocket, code: number) => {
+    clearInterval(keepalive);
+    clearTimeout(welcomeTimer);
+    if (activeSocket === socket) activeSocket = null;
+    if (disposed) return;
+    const terminal = TERMINAL_CLOSES[code];
+    if (terminal) {
+      if (SESSION_ENDING.has(code)) clearSession(session.code);
+      useConnection.setState({ status: "closed", error: terminal, pendingActionId: null });
+      return;
+    }
+    const delay = Math.min(MAX_BACKOFF_MS, 500 * 2 ** attempt) * (0.5 + Math.random() / 2);
+    attempt++;
+    useConnection.setState({ status: "reconnecting", pendingActionId: null });
+    retryTimer = setTimeout(open, delay);
   };
 
   open();
@@ -220,6 +238,7 @@ export function connect(session: SessionResponse): () => void {
     disposed = true;
     clearTimeout(retryTimer);
     clearInterval(keepalive);
+    clearTimeout(welcomeTimer);
     if (ws && activeSocket === ws) activeSocket = null;
     ws?.close(1000, "navigated away");
   };
