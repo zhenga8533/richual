@@ -90,9 +90,8 @@ test("a third player cannot join a game in progress", async ({ browser }) => {
   await byTurn(host, guest);
 
   await late.goto(url);
-  await late.getByLabel("Your name").fill("Late");
-  await late.getByRole("button", { name: "Join" }).click();
-  await expect(late.getByRole("alert")).toHaveText("This game has already started");
+  await expect(late.getByRole("heading", { name: "This game has already started" })).toBeVisible();
+  await expect(late.getByLabel("Your name")).toHaveCount(0);
 });
 
 test("declining a property starts an auction both players see", async ({ browser }) => {

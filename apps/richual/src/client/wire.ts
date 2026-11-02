@@ -1,5 +1,6 @@
 import type {
   ErrorResponse,
+  LobbyInfo,
   PublicLobbiesResponse,
   PublicLobby,
   SessionResponse,
@@ -45,3 +46,9 @@ const isPublicLobby = (value: unknown): value is PublicLobby =>
 
 export const isPublicLobbiesResponse = (value: unknown): value is PublicLobbiesResponse =>
   isRecord(value) && Array.isArray(value.lobbies) && value.lobbies.every(isPublicLobby);
+
+export const isLobbyInfo = (value: unknown): value is LobbyInfo =>
+  isRecord(value) &&
+  typeof value.status === "string" &&
+  typeof value.full === "boolean" &&
+  typeof value.locked === "boolean";

@@ -60,6 +60,14 @@ describe("passcode lobbies", () => {
     expect((await join(session.code, "  hunter22 ")).status).toBe(201);
   });
 
+  it("tells the join page it is locked, without the passcode", async () => {
+    const { session } = await lockedLobby();
+    const res = await exports.default.fetch(`${BASE}/api/lobbies/${session.code}`);
+    const body = await res.text();
+    expect(JSON.parse(body)).toMatchObject({ locked: true });
+    expect(body).not.toContain("hunter22");
+  });
+
   it("never sends the passcode to players", async () => {
     const { socket, lobby } = await lockedLobby("s3cret-word");
     socket.send({ type: "chat", text: "hi" });

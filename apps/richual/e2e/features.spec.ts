@@ -183,8 +183,7 @@ test("a passcode lobby is listed with a lock and asks joiners for the passcode",
   await listing.getByRole("button", { name: "Join" }).click();
 
   await stranger.getByLabel("Your name").fill("Stranger");
-  await stranger.getByRole("button", { name: "Join" }).click();
-  await expect(stranger.getByRole("alert")).toHaveText("This lobby needs a passcode");
+  // The join page already knows the lobby is locked, so it asks up front.
   await stranger.getByLabel("Passcode").fill("wrong");
   await stranger.getByRole("button", { name: "Join" }).click();
   await expect(stranger.getByRole("alert")).toHaveText("That passcode isn't right");
@@ -217,4 +216,8 @@ test("the host can close the lobby for everyone", async ({ browser }) => {
 
   await host.goto("/");
   await expect(host.getByText(url.slice(-6))).toHaveCount(0);
+
+  // The old link now says so before anyone types a name.
+  await guest.goto(url);
+  await expect(guest.getByRole("heading", { name: "This lobby no longer exists" })).toBeVisible();
 });

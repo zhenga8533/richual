@@ -92,6 +92,14 @@ export type SummaryResult = { code: string } & (
 
 export type SummariesResponse = { results: SummaryResult[] };
 
+/** What the join page needs to know before anyone types a name. */
+export type LobbyInfo = {
+  status: "open" | "playing" | "finished";
+  full: boolean;
+  /** Joining needs the host's passcode. */
+  locked: boolean;
+};
+
 /** A public lobby waiting for players, as the Browse tab lists it. */
 export type PublicLobby = {
   code: string;

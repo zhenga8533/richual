@@ -62,5 +62,6 @@ export const LIMITS = {
   clientError: { limit: 30, windowMs: 10 * MINUTE_MS },
   summaries: { limit: 30, windowMs: 10 * MINUTE_MS },
   browse: { limit: 60, windowMs: 10 * MINUTE_MS },
+  lookup: { limit: 60, windowMs: 10 * MINUTE_MS },
   lobbiesPerDay: { limit: 300, windowMs: DAY_MS },
 } as const;
