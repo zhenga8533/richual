@@ -1,11 +1,13 @@
 import type {
   ErrorResponse,
+  LobbyInfo,
   PublicLobbiesResponse,
   SessionResponse,
   SummariesResponse,
 } from "@richual/protocol";
 import {
   isErrorResponse,
+  isLobbyInfo,
   isPublicLobbiesResponse,
   isSessionResponse,
   isSummariesResponse,
@@ -70,5 +72,18 @@ export async function fetchPublicLobbies(): Promise<PublicLobbiesResponse> {
   if (!isPublicLobbiesResponse(json)) {
     throw new ApiError("internal", "Unexpected response from server");
   }
+  return json;
+}
+
+/** Whether a lobby exists and can be joined; null when the code doesn't (or no longer) exist. */
+export async function fetchLobbyInfo(code: string): Promise<LobbyInfo | null> {
+  const res = await fetch(`/api/lobbies/${encodeURIComponent(code)}`);
+  const json: unknown = await res.json().catch(() => null);
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    if (isErrorResponse(json)) throw new ApiError(json.error, json.message);
+    throw new ApiError("internal", `Request failed (${res.status})`);
+  }
+  if (!isLobbyInfo(json)) throw new ApiError("internal", "Unexpected response from server");
   return json;
 }

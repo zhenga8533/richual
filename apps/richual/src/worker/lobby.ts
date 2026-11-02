@@ -21,6 +21,7 @@ import {
   ClientMessage,
   CloseCode,
   type ErrorCode,
+  type LobbyInfo,
   LobbySettings,
   type LobbySnapshot,
   type LobbyStatus,
@@ -832,6 +833,17 @@ export class LobbyDO extends DurableObject<Env> {
       }
     }
     this.commitGame({ ok: true, state, events }, now);
+  }
+
+  /** For the join page. Read-only: an unknown code answers null without creating storage. */
+  async info(): Promise<LobbyInfo | null> {
+    const lobby = this.lobby();
+    if (!lobby) return null;
+    return {
+      status: lobby.status,
+      full: this.players().length >= MAX_PLAYERS,
+      locked: lobby.passcode_hash !== null,
+    };
   }
 
   /**

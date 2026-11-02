@@ -2,8 +2,14 @@ import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from "c
 import { env, exports } from "cloudflare:workers";
 import { CloseCode } from "@richual/protocol";
 import { describe, expect, it } from "vitest";
+import { LIMITS } from "../src/worker/gatekeeper";
 import { IDLE_TTL_MS } from "../src/worker/lobby";
 import { BASE, createLobby, hello, joinLobby, openSocket, post } from "./helpers";
+
+const lookup = (code: string, ip?: string) =>
+  exports.default.fetch(`${BASE}/api/lobbies/${code}`, {
+    headers: ip ? { "CF-Connecting-IP": ip } : {},
+  });
 
 describe("HTTP API", () => {
   it("creates a lobby and returns a host session", async () => {
@@ -34,6 +40,37 @@ describe("HTTP API", () => {
       state.storage.sql.exec("SELECT name FROM sqlite_master WHERE type = 'table'").toArray(),
     );
     expect(tables.filter((t) => !String(t.name).startsWith("_cf"))).toEqual([]);
+  });
+
+  it("describes a lobby for the join page", async () => {
+    const { code } = await createLobby();
+    const res = await lookup(code);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ status: "open", full: false, locked: false });
+
+    for (let i = 1; i < 6; i++) await joinLobby(code, `P${i}`);
+    expect(await (await lookup(code)).json()).toMatchObject({ full: true });
+
+    await runInDurableObject(env.LOBBY.getByName(code), (_, state) => {
+      state.storage.sql.exec("UPDATE lobby SET status = 'playing'");
+    });
+    expect(await (await lookup(code)).json()).toMatchObject({ status: "playing" });
+  });
+
+  it("looks up unknown lobbies as 404 without creating storage", async () => {
+    expect((await lookup("ZZZZZX")).status).toBe(404);
+    expect((await lookup("bad!")).status).toBe(404);
+    const tables = await runInDurableObject(env.LOBBY.getByName("ZZZZZX"), (_, state) =>
+      state.storage.sql.exec("SELECT name FROM sqlite_master WHERE type = 'table'").toArray(),
+    );
+    expect(tables.filter((t) => !String(t.name).startsWith("_cf"))).toEqual([]);
+  });
+
+  it("rate-limits lookups per client", async () => {
+    const { code } = await createLobby();
+    const ip = "203.0.113.150";
+    for (let i = 0; i < LIMITS.lookup.limit; i++) expect((await lookup(code, ip)).status).toBe(200);
+    expect((await lookup(code, ip)).status).toBe(429);
   });
 
   it("returns 404 for malformed codes", async () => {

@@ -7,6 +7,7 @@ import {
   type ErrorResponse,
   JoinLobbyRequest,
   LobbyCode,
+  type LobbyInfo,
   MAX_PUBLIC_LOBBIES,
   type PublicLobbiesResponse,
   SummariesRequest,
@@ -127,6 +128,16 @@ app.get("/api/lobbies/public", async (c) => {
   if (limited) return limited;
   const lobbies = await c.env.DIRECTORY.getByName("directory").list(MAX_PUBLIC_LOBBIES);
   return c.json({ lobbies } satisfies PublicLobbiesResponse);
+});
+
+app.get("/api/lobbies/:code", async (c) => {
+  const code = LobbyCode.safeParse(c.req.param("code"));
+  if (!code.success) return c.json(errorBody("not_found", "Lobby not found"), 404);
+  const limited = await rateLimit(c.env, c.req.raw, ["lookup"]);
+  if (limited) return limited;
+  const info = await c.env.LOBBY.getByName(code.data).info();
+  if (!info) return c.json(errorBody("not_found", "Lobby not found"), 404);
+  return c.json(info satisfies LobbyInfo);
 });
 
 app.post("/api/lobbies/:code/join", async (c) => {

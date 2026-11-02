@@ -1,7 +1,7 @@
-import type { SessionResponse } from "@richual/protocol";
+import type { LobbyInfo, SessionResponse } from "@richual/protocol";
 import { Check, Link2 } from "lucide-react";
 import { type FormEvent, lazy, Suspense, useEffect, useRef, useState } from "react";
-import { ApiError, claimSeat, joinLobby } from "../api";
+import { ApiError, claimSeat, fetchLobbyInfo, joinLobby } from "../api";
 import { SeatTransfer } from "../components/SeatTransfer";
 import { type ConnectionStatus, connect, useConnection } from "../connection";
 import { navigate, seatCodeFromHash } from "../router";
@@ -66,10 +66,54 @@ function JoinForm({
   onJoined: (session: SessionResponse) => void;
 }) {
   const [name, setName] = useState(loadName);
-  // Null until the lobby says it needs a passcode; there is no way to ask beforehand.
+  // Undefined while loading or if the lookup failed; the form then works as if unknown.
+  const [info, setInfo] = useState<LobbyInfo | null | undefined>(undefined);
+  // Null until the lobby is known to need a passcode.
   const [passcode, setPasscode] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let current = true;
+    fetchLobbyInfo(code)
+      .then((found) => {
+        if (!current) return;
+        setInfo(found);
+        if (found?.locked) setPasscode((p) => p ?? "");
+      })
+      .catch((err: unknown) => console.warn("lobby lookup failed; joining blind", err));
+    return () => {
+      current = false;
+    };
+  }, [code]);
+
+  const unavailable =
+    info === null
+      ? {
+          title: "This lobby no longer exists",
+          detail: "Its host closed it, or it expired after a week without play.",
+        }
+      : info && info.status !== "open"
+        ? { title: "This game has already started", detail: "Ask the host for a new invite." }
+        : info?.full
+          ? { title: "This lobby is full", detail: "All six seats are taken." }
+          : null;
+  if (unavailable) {
+    return (
+      <div className="flex w-full max-w-sm flex-1 flex-col justify-center py-8">
+        <Card className="flex flex-col gap-4 p-5">
+          <div>
+            <p className="font-mono text-sm tracking-[0.25em] text-muted">{code}</p>
+            <h1 className="text-xl font-semibold">{unavailable.title}</h1>
+            <p className="mt-1 text-sm text-muted">{unavailable.detail}</p>
+          </div>
+          <Button variant="primary" onClick={() => navigate("/")}>
+            Back to start
+          </Button>
+        </Card>
+      </div>
+    );
+  }
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -120,7 +164,8 @@ function JoinForm({
                 maxLength={20}
                 required
                 autoComplete="off"
-                autoFocus
+                // Only when it appears after a failed join; otherwise the name comes first.
+                autoFocus={!info?.locked}
               />
             </Label>
           )}
