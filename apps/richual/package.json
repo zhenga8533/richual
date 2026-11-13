@@ -18,28 +18,28 @@
     "@richual/protocol": "workspace:*",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
-    "hono": "4.13.14",
-    "lucide-react": "1.65.0",
+    "hono": "4.13.17",
+    "lucide-react": "1.71.0",
     "qrcode-generator": "2.0.4",
     "radix-ui": "1.8.1",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "tailwind-merge": "3.7.0",
     "zod": "4.6.7",
-    "zustand": "5.0.16"
+    "zustand": "5.1.0"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.14.0",
-    "@cloudflare/vite-plugin": "1.66.0",
-    "@cloudflare/vitest-plugin": "1.4.10",
-    "@playwright/test": "1.64.1",
-    "@tailwindcss/vite": "4.3.3",
+    "@cloudflare/vite-plugin": "1.68.0",
+    "@cloudflare/vitest-plugin": "1.6.1",
+    "@playwright/test": "1.65.0",
+    "@tailwindcss/vite": "4.3.5",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
-    "@vitejs/plugin-react": "6.1.2",
-    "tailwindcss": "4.3.3",
-    "vite": "8.3.5",
-    "vitest": "5.0.5",
-    "wrangler": "4.155.0"
+    "@vitejs/plugin-react": "6.3.0",
+    "tailwindcss": "4.3.5",
+    "vite": "8.3.7",
+    "vitest": "5.1.0",
+    "wrangler": "4.159.0"
   }
 }
